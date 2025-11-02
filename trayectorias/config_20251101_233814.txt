@@ -1,0 +1,55 @@
+============================================================
+CONFIGURACIÓN DE TRAYECTORIA 2R - TRÉBOL
+============================================================
+
+Fecha y hora: 2025-11-01 23:38:14
+
+PARÁMETROS DEL TRÉBOL:
+----------------------------------------
+  Número de hojas (lóbulos): 4
+  Parámetro b [grados]: 90.00°
+  Parámetro b [radianes]: 1.5708 rad
+  Parámetro M (modulación): 0.300
+  Escala [cm]: 7.46 cm
+  Centro [cm]: (10.00, 10.00)
+
+PARÁMETROS DEL BRAZO:
+----------------------------------------
+  Longitud eslabón 1 (d1): 20.00 cm
+  Longitud eslabón 2 (d2): 18.00 cm
+  Base del brazo: (-5.00, -5.00) cm
+  Alcance total (d1+d2): 38.00 cm
+
+PARÁMETROS DE MOVIMIENTO:
+----------------------------------------
+  Velocidad lineal deseada: 6.00 cm/s
+  Velocidad lineal efectiva: 6.00 cm/s
+  Frecuencia de muestreo (fps): 60 Hz
+  Número de ciclos: 10
+  Configuración de codo: up
+  Tiempo de blend inicial: 1.00 s
+  Tiempo de espera (dwell): 1.00 s
+
+LÍMITES ARTICULARES:
+----------------------------------------
+  ω máxima: 6.00 rad/s
+  α máxima: 50.00 rad/s²
+
+INFORMACIÓN DE LA TRAYECTORIA:
+----------------------------------------
+  Duración total: 103.483 s
+  Número total de puntos: 6210
+  Índice de inicio en curva: 2044
+
+CONVENCIÓN DE ÁNGULOS:
+----------------------------------------
+  θ₁: ángulo del eslabón 1 medido desde la horizontal (eje +X)
+  θ₂: ángulo relativo del eslabón 2 respecto al eslabón 1
+       (θ₂ = 0 cuando los eslabones están colineales)
+
+ARCHIVOS GENERADOS:
+----------------------------------------
+  Configuración: config_20251101_233814.txt
+  Datos CSV: trajectory_20251101_233814.csv
+
+============================================================

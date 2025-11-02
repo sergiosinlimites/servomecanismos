@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Slider, Button
 from typing import Tuple, Optional
+from datetime import datetime
+import os
 
 __VERSION__ = "6.2-start-stop"
 CM = 1.0
@@ -326,6 +328,88 @@ class Simulator:
         self.running=False
 
 # ==============================
+# Guardado de datos
+# ==============================
+
+def save_trajectory_data(t: np.ndarray, thetas: np.ndarray, 
+                         arm_params: ArmParams, tref_spec: TrefoilSpec, 
+                         motion: MotionSpec, v_eff: float, idx0: int,
+                         output_dir: str = "trayectorias"):
+    """Guarda parámetros en TXT y serie temporal θ₁,θ₂ en CSV."""
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 1) Archivo TXT con parámetros legibles
+    txt_path = os.path.join(output_dir, f"config_{timestamp}.txt")
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        f.write("=" * 60 + "\n")
+        f.write("CONFIGURACIÓN DE TRAYECTORIA 2R - TRÉBOL\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"Fecha y hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        f.write("PARÁMETROS DEL TRÉBOL:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"  Número de hojas (lóbulos): {tref_spec.a}\n")
+        f.write(f"  Parámetro b [grados]: {np.rad2deg(tref_spec.b):.2f}°\n")
+        f.write(f"  Parámetro b [radianes]: {tref_spec.b:.4f} rad\n")
+        f.write(f"  Parámetro M (modulación): {tref_spec.M:.3f}\n")
+        f.write(f"  Escala [cm]: {tref_spec.scale_cm:.2f} cm\n")
+        f.write(f"  Centro [cm]: ({tref_spec.center[0]:.2f}, {tref_spec.center[1]:.2f})\n\n")
+        
+        f.write("PARÁMETROS DEL BRAZO:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"  Longitud eslabón 1 (d1): {arm_params.d1:.2f} cm\n")
+        f.write(f"  Longitud eslabón 2 (d2): {arm_params.d2:.2f} cm\n")
+        f.write(f"  Base del brazo: ({arm_params.base[0]:.2f}, {arm_params.base[1]:.2f}) cm\n")
+        f.write(f"  Alcance total (d1+d2): {arm_params.d1 + arm_params.d2:.2f} cm\n\n")
+        
+        f.write("PARÁMETROS DE MOVIMIENTO:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"  Velocidad lineal deseada: {motion.speed_cm_s:.2f} cm/s\n")
+        f.write(f"  Velocidad lineal efectiva: {v_eff:.2f} cm/s\n")
+        f.write(f"  Frecuencia de muestreo (fps): {motion.fps} Hz\n")
+        f.write(f"  Número de ciclos: {motion.cycles}\n")
+        f.write(f"  Configuración de codo: {'up' if motion.elbow_up else 'down'}\n")
+        f.write(f"  Tiempo de blend inicial: {motion.blend_s:.2f} s\n")
+        f.write(f"  Tiempo de espera (dwell): {motion.dwell_s:.2f} s\n\n")
+        
+        f.write("LÍMITES ARTICULARES:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"  ω máxima: {motion.w_max:.2f} rad/s\n")
+        f.write(f"  α máxima: {motion.a_max:.2f} rad/s²\n\n")
+        
+        f.write("INFORMACIÓN DE LA TRAYECTORIA:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"  Duración total: {t[-1]:.3f} s\n")
+        f.write(f"  Número total de puntos: {len(t)}\n")
+        f.write(f"  Índice de inicio en curva: {idx0}\n\n")
+        
+        f.write("CONVENCIÓN DE ÁNGULOS:\n")
+        f.write("-" * 40 + "\n")
+        f.write("  θ₁: ángulo del eslabón 1 medido desde la horizontal (eje +X)\n")
+        f.write("  θ₂: ángulo relativo del eslabón 2 respecto al eslabón 1\n")
+        f.write("       (θ₂ = 0 cuando los eslabones están colineales)\n\n")
+        
+        f.write("ARCHIVOS GENERADOS:\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"  Configuración: config_{timestamp}.txt\n")
+        f.write(f"  Datos CSV: trajectory_{timestamp}.csv\n\n")
+        f.write("=" * 60 + "\n")
+    
+    # 2) Archivo CSV con serie temporal
+    csv_path = os.path.join(output_dir, f"trajectory_{timestamp}.csv")
+    with open(csv_path, 'w', encoding='utf-8') as f:
+        f.write("# Trayectoria 2R - Referencias angulares\n")
+        f.write(f"# Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("# theta1: ángulo eslabón 1 desde horizontal [rad]\n")
+        f.write("# theta2: ángulo relativo eslabón 2 [rad]\n")
+        f.write("time_s,theta1_rad,theta2_rad\n")
+        for i in range(len(t)):
+            f.write(f"{t[i]:.6f},{thetas[i,0]:.6f},{thetas[i,1]:.6f}\n")
+    
+    return txt_path, csv_path
+
+# ==============================
 # App principal
 # ==============================
 
@@ -340,6 +424,13 @@ class App:
 
         self.sim=Simulator(self.arm,self.canvas)
         self.prof=ProfilesPlotter()
+        
+        # Almacenar última trayectoria planificada
+        self.last_t = None
+        self.last_thetas = None
+        self.last_v_eff = None
+        self.last_idx0 = None
+        
         self._build_controls()
         self._try_plan_and_load()  # plan inicial (no arranca animación)
 
@@ -404,6 +495,13 @@ class App:
             self.arm_params.check_reach_requirement()
             planner=TrajectoryPlanner(self.arm, self.tref, self.motion)
             t, ref_xy, thetas, v_eff, idx0 = planner.build()
+            
+            # Guardar datos de la planificación
+            self.last_t = t
+            self.last_thetas = thetas
+            self.last_v_eff = v_eff
+            self.last_idx0 = idx0
+            
             self.sim.load(t, ref_xy, thetas, self.motion.fps)
             self.prof.update(t, thetas, self.motion.fps)
             self.sim.status.set_text(f"OK (v efectiva={v_eff:.2f} cm/s, inicio idx={idx0})")
@@ -416,6 +514,19 @@ class App:
         self.sim.stop()
         self._read_sliders_into_state()
         if self._try_plan_and_load():
+            # Guardar archivos TXT y CSV con la trayectoria
+            try:
+                txt_path, csv_path = save_trajectory_data(
+                    self.last_t, self.last_thetas,
+                    self.arm_params, self.tref_spec, self.motion,
+                    self.last_v_eff, self.last_idx0
+                )
+                print(f"✓ Archivos guardados:")
+                print(f"  - Configuración: {txt_path}")
+                print(f"  - Trayectoria CSV: {csv_path}")
+            except Exception as e:
+                print(f"⚠ Error al guardar archivos: {e}")
+            
             self.sim.start()
 
     def _on_stop(self, _evt):

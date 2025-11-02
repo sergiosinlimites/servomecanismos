@@ -37,17 +37,41 @@ Este repositorio implementa un **gemelo digital** de un brazo planar 2R que dibu
 ```
 
 ## Archivos clave
-- **`/mnt/data/gemelo_2R_serial.py`** — Script principal (simulación + serial + análisis).
+- **`gemelo_digital_2R_trebol_pt2.py`** — Simulador interactivo con UI (guarda TXT y CSV al presionar Start).
+- **`gemelo_2R_serial.py`** — Script principal (simulación + serial + análisis en tiempo real).
+- **`visualizar_trayectoria.py`** — Herramienta para visualizar archivos CSV generados.
+- **`csv_to_arduino.py`** — Conversor de CSV a arrays de Arduino (PROGMEM).
 - **Sketch Arduino** — Ver **firmware/** y **SERIAL_PROTOCOL.md**.
 
 ## Cómo correr (vista rápida)
-1. Python ≥ 3.9. Instala dependencias: `pip install numpy matplotlib pyserial`.
+
+### Opción 1: Simulador Interactivo (genera archivos TXT/CSV)
+```bash
+python gemelo_digital_2R_trebol_pt2.py
+```
+- Ajusta parámetros con sliders
+- Presiona **Start** → guarda automáticamente:
+  - `trayectorias/config_YYYYMMDD_HHMMSS.txt` (parámetros legibles)
+  - `trayectorias/trajectory_YYYYMMDD_HHMMSS.csv` (serie temporal θ₁, θ₂)
+- Ver guía completa: **`docs/COMO_USAR_TRAYECTORIAS.md`**
+
+### Opción 2: Streaming en Tiempo Real a Arduino
+1. Python ≥ 3.9. Instala dependencias: `pip install numpy matplotlib pyserial pandas`.
 2. Carga el sketch en Arduino (IDE o CLI). Ver **firmware/BUILD_FLASH.md**.
 3. Ejecuta:
    ```bash
    python gemelo_2R_serial.py --port=COM3 --baud=115200 --log=run_telemetry.csv --no-anim
    ```
 4. Para solo simular: `python gemelo_2R_serial.py`
+
+### Herramientas Adicionales
+```bash
+# Visualizar trayectoria guardada
+python visualizar_trayectoria.py trayectorias/trajectory_20250102_143022.csv
+
+# Convertir CSV a código Arduino
+python csv_to_arduino.py trayectorias/trajectory_20250102_143022.csv -o trajectory_data.h -d 2
+```
 
 ## Licencia
 Ver **LICENSE.md**.
