@@ -1,1 +1,7 @@
 venv/
+# Generated trajectories and analysis outputs
+trayectorias/
+data/
+**/trayectorias/
+**/*.csv
+**/*.txt
