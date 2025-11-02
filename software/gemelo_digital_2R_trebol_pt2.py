@@ -19,8 +19,15 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.widgets import Slider, Button
+from matplotlib.widgets import Slider, Button, TextBox, CheckButtons
 from typing import Tuple, Optional
+import threading
+import time
+import csv
+try:
+    import serial  # pyserial
+except Exception:
+    serial = None
 from datetime import datetime
 import os
 
@@ -252,7 +259,7 @@ class ProfilesPlotter:
         self.fig.canvas.manager.set_window_title("Perfiles articulares")
         ylabels=["Ángulo θ [°]","Velocidad ω [°/s]","Aceleración α [°/s²]","Jerk dα/dt [°/s³]"]
         for ax,yl in zip(self.axs,ylabels): ax.set_ylabel(yl); ax.grid(True,alpha=0.3)
-        self.axs[-1].set_xlabel("Tiempo [s]"); self.lines=None
+        self.axs[-1].set_xlabel("Tiempo [s]"); self.lines=None; self.real_lines=None
         
     def update(self, t:np.ndarray, thetas:np.ndarray, fps:int, skip_initial:bool=True,
                start_index: int = None, cycle_frames: int = None):
@@ -304,6 +311,19 @@ class ProfilesPlotter:
             data=[theta1_deg,theta2_deg,omega1_deg,omega2_deg,alpha1_deg,alpha2_deg,jerk1_deg,jerk2_deg]
             for line,y in zip(self.lines,data): line.set_data(t_plot,y)
             for ax in self.axs: ax.relim(); ax.autoscale_view()
+        self.fig.canvas.draw_idle()
+
+    def overlay_real(self, t_plot: np.ndarray, theta1_deg: np.ndarray, theta2_deg: np.ndarray):
+        if self.real_lines is None:
+            lr1,=self.axs[0].plot(t_plot, theta1_deg, 'b--', alpha=0.7, label="θ1 real")
+            lr2,=self.axs[0].plot(t_plot, theta2_deg, 'r--', alpha=0.7, label="θ2 real")
+            self.real_lines=(lr1,lr2)
+            self.axs[0].legend(loc="upper right")
+        else:
+            self.real_lines[0].set_data(t_plot, theta1_deg)
+            self.real_lines[1].set_data(t_plot, theta2_deg)
+        for ax in self.axs:
+            ax.relim(); ax.autoscale_view()
         self.fig.canvas.draw_idle()
 
 # ==============================
@@ -558,6 +578,114 @@ class Simulator:
         self.running=False
 
 # ==============================
+# Serial streaming a Arduino + Telemetría
+# ==============================
+
+class SerialStreamer:
+    def __init__(self, port: str, baud: int, out_dir: str):
+        self.port = port
+        self.baud = baud
+        self.out_dir = out_dir
+        self.thread = None
+        self._stop = threading.Event()
+        self.telemetry_rows = []  # (pc_time_s, arduino_ms, q1, q2, q1_ref, q2_ref, u1, u2)
+        self._ser = None
+
+    def start(self, t: np.ndarray, thetas: np.ndarray) -> bool:
+        if serial is None:
+            return False
+        try:
+            self._ser = serial.Serial(self.port, self.baud, timeout=0.02)
+        except Exception:
+            return False
+        self._stop.clear()
+        self.thread = threading.Thread(target=self._run, args=(t, thetas), daemon=True)
+        self.thread.start()
+        return True
+
+    def stop(self):
+        self._stop.set()
+        if self.thread is not None:
+            self.thread.join(timeout=2.0)
+        if self._ser is not None:
+            try:
+                self._ser.write(b'S\n')
+                self._ser.flush()
+            except Exception:
+                pass
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+
+    def _run(self, t: np.ndarray, thetas: np.ndarray):
+        ser = self._ser
+        # Cero rápido
+        try:
+            ser.write(b'Z\n'); ser.flush()
+        except Exception:
+            pass
+        t0 = time.perf_counter()
+        t_csv0 = float(t[0])
+        ms0 = None
+        buf = b''
+        i = 0
+        n = len(t)
+        while not self._stop.is_set() and i < n:
+            # timing
+            tgt = (float(t[i]) - t_csv0)
+            while not self._stop.is_set() and (time.perf_counter() - t0) < (tgt - 1e-4):
+                # leer telemetría mientras esperamos
+                try:
+                    chunk = ser.read(128)
+                    if chunk:
+                        buf += chunk
+                        while b'\n' in buf:
+                            line, buf = buf.split(b'\n', 1)
+                            line = line.decode('ascii', errors='ignore').strip()
+                            if not line:
+                                continue
+                            if line.startswith('Y'):
+                                parts = line.split(',')
+                                if len(parts) >= 8:
+                                    try:
+                                        ar_ms = int(parts[1])
+                                    except Exception:
+                                        continue
+                                    if ms0 is None:
+                                        ms0 = ar_ms
+                                    try:
+                                        q1 = float(parts[2]); q2 = float(parts[3])
+                                        q1r= float(parts[4]); q2r= float(parts[5])
+                                        u1 = float(parts[6]); u2 = float(parts[7])
+                                    except Exception:
+                                        continue
+                                    pc_time = time.perf_counter() - t0
+                                    self.telemetry_rows.append((pc_time, ar_ms, q1, q2, q1r, q2r, u1, u2))
+                except Exception:
+                    pass
+                time.sleep(0.0005)
+            # enviar comando R
+            try:
+                cmd = f"R,{thetas[i,0]:.6f},{thetas[i,1]:.6f}\n".encode('ascii')
+                ser.write(cmd)
+            except Exception:
+                pass
+            i += 1
+
+    def write_log(self, filepath: str):
+        if not self.telemetry_rows:
+            return
+        header = ['pc_time_s','arduino_ms','q1','q2','q1_ref','q2_ref','u1','u2']
+        try:
+            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(header)
+                w.writerows(self.telemetry_rows)
+        except Exception:
+            pass
+
+# ==============================
 # Guardado de datos
 # ==============================
 
@@ -659,6 +787,11 @@ class App:
         self.tref_spec=TrefoilSpec(a=4,b=math.pi/2,M=0.3,scale_cm=7.5*CM,center=(10.0*CM,10.0*CM))
         self.tref=TrefoilGenerator(self.tref_spec,self.canvas)
         self.motion=MotionSpec()  # cycles=10 por defecto
+        # Serial
+        self.serial_port = os.environ.get('SERIAL_PORT', 'COM3')
+        self.serial_baud = int(os.environ.get('SERIAL_BAUD', '115200'))
+        self.serial_enabled = True
+        self.streamer: Optional[SerialStreamer] = None
 
         self.sim=Simulator(self.arm,self.canvas)
         self.prof=ProfilesPlotter()
@@ -686,14 +819,19 @@ class App:
         ax_d2    = fig.add_axes([0.58,0.30,0.32,0.03])
         ax_v     = fig.add_axes([0.58,0.25,0.32,0.03])
         ax_blend = fig.add_axes([0.58,0.20,0.32,0.03])
-        # Bloque 3: límites y ciclos
-        ax_wmax  = fig.add_axes([0.10,0.14,0.32,0.03])
-        ax_amax  = fig.add_axes([0.58,0.14,0.32,0.03])
-        ax_cycles= fig.add_axes([0.34,0.09,0.32,0.03])
-        # Botones
-        ax_start = fig.add_axes([0.18,0.02,0.18,0.05])
-        ax_stop  = fig.add_axes([0.41,0.02,0.18,0.05])
-        ax_reset = fig.add_axes([0.64,0.02,0.18,0.05])
+        # Bloque 3: límites y ciclos (ajustado para dejar espacio a controles Serial)
+        ax_wmax  = fig.add_axes([0.10,0.17,0.32,0.03])
+        ax_amax  = fig.add_axes([0.58,0.17,0.32,0.03])
+        ax_cycles= fig.add_axes([0.34,0.12,0.32,0.03])
+        # Botones (ligero ajuste de tamaño)
+        ax_start = fig.add_axes([0.16,0.02,0.20,0.045])
+        ax_stop  = fig.add_axes([0.40,0.02,0.20,0.045])
+        ax_reset = fig.add_axes([0.64,0.02,0.20,0.045])
+
+        # Serial controls (TextBox para puerto/baudios y Check para habilitar)
+        ax_port = fig.add_axes([0.10,0.07,0.22,0.035])
+        ax_baud = fig.add_axes([0.36,0.07,0.22,0.035])
+        ax_chk  = fig.add_axes([0.62,0.07,0.26,0.04])
 
         self.s_a     = Slider(ax_a,    "a (lóbulos)", 1, 12, valinit=self.tref_spec.a, valstep=1)
         self.s_b_deg = Slider(ax_bdeg, "b (°)", 0, 360, valinit=np.rad2deg(self.tref_spec.b))
@@ -713,9 +851,26 @@ class App:
         self.btn_stop  = Button(ax_stop, "Stop",  color="0.88", hovercolor="0.82")
         self.btn_reset = Button(ax_reset,"Reset", color="0.88", hovercolor="0.82")
 
+        self.txt_port = TextBox(ax_port, "Puerto ", initial=str(self.serial_port))
+        self.txt_baud = TextBox(ax_baud, "Baudios ", initial=str(self.serial_baud))
+        self.chk_serial = CheckButtons(ax_chk, ["Serial"], [self.serial_enabled])
+
         self.btn_start.on_clicked(self._on_start)
         self.btn_stop.on_clicked(self._on_stop)
         self.btn_reset.on_clicked(self._on_reset)
+
+        def _on_port_submit(text):
+            self.serial_port = text.strip() or self.serial_port
+        def _on_baud_submit(text):
+            try:
+                self.serial_baud = int(text.strip())
+            except Exception:
+                pass
+        def _on_chk(label):
+            self.serial_enabled = not self.serial_enabled
+        self.txt_port.on_submit(_on_port_submit)
+        self.txt_baud.on_submit(_on_baud_submit)
+        self.chk_serial.on_clicked(_on_chk)
 
     def _read_sliders_into_state(self):
         self.tref_spec.a=int(self.s_a.val)
@@ -777,11 +932,44 @@ class App:
                     pass
             except Exception as e:
                 print(f"⚠ Error al guardar archivos: {e}")
-            
+            # Iniciar streaming Serial → Arduino (si está habilitado)
+            if self.serial_enabled:
+                telem_path = os.path.join(os.path.dirname(txt_path), os.path.basename(txt_path).replace('config_', 'telemetry_').replace('.txt', '.csv'))
+                self.streamer = SerialStreamer(self.serial_port, self.serial_baud, os.path.dirname(txt_path))
+                started = self.streamer.start(self.last_t, self.last_thetas)
+                if not started:
+                    self.sim.status.set_text("Serial NO iniciado (revise puerto/pyserial)")
+                else:
+                    self.sim.status.set_text(f"Serial {self.serial_port}@{self.serial_baud} activo…")
             self.sim.start()
 
     def _on_stop(self, _evt):
         self.sim.stop()
+        # Detener streamer y registrar telemetría + overlay
+        if self.streamer is not None:
+            self.streamer.stop()
+            # Guardar telemetría
+            out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'trayectorias')
+            os.makedirs(out_dir, exist_ok=True)
+            telem_file = os.path.join(out_dir, f"telemetry_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+            self.streamer.write_log(telem_file)
+            # Overlay de θ real en la primera vuelta
+            if self.streamer.telemetry_rows and self.last_start_idx is not None and self.last_cycle_frames is not None:
+                tel = np.array(self.streamer.telemetry_rows)
+                tel_t = tel[:,0]  # pc_time_s relativo
+                tel_q1 = tel[:,2]; tel_q2 = tel[:,3]
+                # Segmento sim a graficar
+                idx0 = int(self.last_start_idx)
+                idx1 = int(min(len(self.last_t), idx0 + int(self.last_cycle_frames)))
+                t_seg = self.last_t[idx0:idx1]
+                t_rel = t_seg - t_seg[0]
+                # Re-muestrear telemetría sobre t_rel
+                # Asegurar monotonicidad
+                if len(tel_t) >= 2 and (tel_t[-1] - tel_t[0]) > 1e-6:
+                    q1r = np.interp(t_rel, tel_t - tel_t[0], tel_q1)
+                    q2r = np.interp(t_rel, tel_t - tel_t[0], tel_q2)
+                    self.prof.overlay_real(t_rel, np.rad2deg(q1r), np.rad2deg(q2r))
+        self.streamer = None
 
     def _on_reset(self, _evt):
         for s in (self.s_a, self.s_b_deg, self.s_M, self.s_scale,
