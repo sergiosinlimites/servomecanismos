@@ -3,5 +3,5 @@ venv/
 trayectorias/
 data/
 **/trayectorias/
-**/*.csv
-**/*.txt
+data/trayectorias/*.csv
+data/trayectorias/*.txt
