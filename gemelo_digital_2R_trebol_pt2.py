@@ -231,7 +231,8 @@ class TrajectoryPlanner:
             th_cyc=self._ik_path(np.stack([xcyc,ycyc],axis=1), self.motion.elbow_up)
             thetas[start:end,:]=th_cyc
 
-        return t, ref_xy, thetas, v, idx0  # idx0 devuelto para depuración
+        start_idx_traj = N0 + Nblend  # inicio del primer ciclo (excluye posicionamiento inicial)
+        return t, ref_xy, thetas, v, idx0, start_idx_traj, N_cycle  # idx0 devuelto para depuración
 
 # ==============================
 # Perfiles (θ, ω, α, jerk)
@@ -249,21 +250,250 @@ class ProfilesPlotter:
     def __init__(self):
         self.fig,self.axs=plt.subplots(4,1,figsize=(9,7),sharex=True)
         self.fig.canvas.manager.set_window_title("Perfiles articulares")
-        ylabels=["Ángulo θ [rad]","Velocidad ω [rad/s]","Aceleración α [rad/s²]","Jerk dα/dt [rad/s³]"]
+        ylabels=["Ángulo θ [°]","Velocidad ω [°/s]","Aceleración α [°/s²]","Jerk dα/dt [°/s³]"]
         for ax,yl in zip(self.axs,ylabels): ax.set_ylabel(yl); ax.grid(True,alpha=0.3)
         self.axs[-1].set_xlabel("Tiempo [s]"); self.lines=None
-    def update(self, t:np.ndarray, thetas:np.ndarray, fps:int):
-        P=angular_profiles(t,thetas.shape[0]//(t[-1]/(1.0/fps)) if t[-1]>0 else fps) if False else angular_profiles(thetas,fps)
+        
+    def update(self, t:np.ndarray, thetas:np.ndarray, fps:int, skip_initial:bool=True,
+               start_index: int = None, cycle_frames: int = None):
+        """
+        Actualiza los perfiles con opción de omitir posicionamiento inicial.
+        skip_initial: Si True, excluye los primeros segmentos (dwell + blend)
+        """
+        P=angular_profiles(thetas,fps)
+        
+        # Detectar dónde termina el posicionamiento inicial (cambio significativo en velocidad)
+        if start_index is not None and 0 <= start_index < len(t):
+            idx_start = int(start_index)
+        elif skip_initial and len(t) > 120:  # Al menos 2 segundos @ 60fps
+            omega_norm = np.sqrt(P["omega1"]**2 + P["omega2"]**2)
+            # Buscar donde la velocidad se estabiliza en el trazo
+            threshold = np.percentile(omega_norm, 10)  # 10% más bajo
+            stable_start = np.where(omega_norm > threshold * 2)[0]
+            if len(stable_start) > 0:
+                idx_start = max(60, stable_start[0] - 10)  # Con margen
+            else:
+                idx_start = 0
+        else:
+            idx_start = 0
+        
+        # Recortar datos
+        if cycle_frames is not None and cycle_frames > 0:
+            idx_end = min(len(t), idx_start + int(cycle_frames))
+        else:
+            idx_end = len(t)
+        t_plot = t[idx_start:idx_end]
+        
+        # Convertir a grados para visualización
+        theta1_deg = np.rad2deg(P["theta1"][idx_start:idx_end])
+        theta2_deg = np.rad2deg(P["theta2"][idx_start:idx_end])
+        omega1_deg = np.rad2deg(P["omega1"][idx_start:idx_end])
+        omega2_deg = np.rad2deg(P["omega2"][idx_start:idx_end])
+        alpha1_deg = np.rad2deg(P["alpha1"][idx_start:idx_end])
+        alpha2_deg = np.rad2deg(P["alpha2"][idx_start:idx_end])
+        jerk1_deg = np.rad2deg(P["jerk1"][idx_start:idx_end])
+        jerk2_deg = np.rad2deg(P["jerk2"][idx_start:idx_end])
+        
         if self.lines is None:
-            l1,=self.axs[0].plot(t,P["theta1"],label="θ1"); l2,=self.axs[0].plot(t,P["theta2"],label="θ2")
-            l3,=self.axs[1].plot(t,P["omega1"]); l4,=self.axs[1].plot(t,P["omega2"])
-            l5,=self.axs[2].plot(t,P["alpha1"]); l6,=self.axs[2].plot(t,P["alpha2"])
-            l7,=self.axs[3].plot(t,P["jerk1"]);  l8,=self.axs[3].plot(t,P["jerk2"])
+            l1,=self.axs[0].plot(t_plot,theta1_deg,label="θ1"); l2,=self.axs[0].plot(t_plot,theta2_deg,label="θ2")
+            l3,=self.axs[1].plot(t_plot,omega1_deg); l4,=self.axs[1].plot(t_plot,omega2_deg)
+            l5,=self.axs[2].plot(t_plot,alpha1_deg); l6,=self.axs[2].plot(t_plot,alpha2_deg)
+            l7,=self.axs[3].plot(t_plot,jerk1_deg);  l8,=self.axs[3].plot(t_plot,jerk2_deg)
             self.lines=(l1,l2,l3,l4,l5,l6,l7,l8); self.axs[0].legend(loc="upper right")
         else:
-            data=[P["theta1"],P["theta2"],P["omega1"],P["omega2"],P["alpha1"],P["alpha2"],P["jerk1"],P["jerk2"]]
-            for line,y in zip(self.lines,data): line.set_data(t,y)
+            data=[theta1_deg,theta2_deg,omega1_deg,omega2_deg,alpha1_deg,alpha2_deg,jerk1_deg,jerk2_deg]
+            for line,y in zip(self.lines,data): line.set_data(t_plot,y)
             for ax in self.axs: ax.relim(); ax.autoscale_view()
+        self.fig.canvas.draw_idle()
+
+# ==============================
+# Análisis de ángulos (caracterización)
+# ==============================
+
+class AngleAnalyzer:
+    def __init__(self):
+        # Usar constrained_layout para evitar solapes entre ejes, colorbars y tabla
+        self.fig = plt.figure(figsize=(14, 9), constrained_layout=True)
+        self.fig.canvas.manager.set_window_title("Análisis de Ángulos - Caracterización")
+        # Reservar más altura para la fila de la tabla para que no invada las gráficas
+        gs = self.fig.add_gridspec(3, 3, height_ratios=[1.0, 1.0, 1.25])
+        
+        # Fila 1: Histogramas de θ1 y θ2
+        self.ax_hist1 = self.fig.add_subplot(gs[0, 0])
+        self.ax_hist2 = self.fig.add_subplot(gs[0, 1])
+        self.ax_hist2d = self.fig.add_subplot(gs[0, 2])
+        
+        # Fila 2: Demandas (velocidad y aceleración)
+        self.ax_omega = self.fig.add_subplot(gs[1, 0])
+        self.ax_alpha = self.fig.add_subplot(gs[1, 1])
+        self.ax_effort = self.fig.add_subplot(gs[1, 2])
+        
+        # Fila 3: Estadísticas y tabla
+        self.ax_stats = self.fig.add_subplot(gs[2, :])
+        self.ax_stats.axis('off')
+        
+    def analyze(self, t: np.ndarray, thetas: np.ndarray, fps: int,
+                skip_initial: bool = True, start_index: int = None, cycle_frames: int = None):
+        """Analiza y caracteriza los ángulos de la trayectoria."""
+        P = angular_profiles(thetas, fps)
+        
+        # Detectar inicio del trazo (omitir posicionamiento)
+        idx_start = 0
+        if start_index is not None and 0 <= start_index < len(t):
+            idx_start = int(start_index)
+        elif skip_initial and len(t) > 120:
+            omega_norm = np.sqrt(P["omega1"]**2 + P["omega2"]**2)
+            threshold = np.percentile(omega_norm, 10)
+            stable_start = np.where(omega_norm > threshold * 2)[0]
+            if len(stable_start) > 0:
+                idx_start = max(60, stable_start[0] - 10)
+        
+        # Determinar fin (solo primer ciclo si se solicita)
+        if cycle_frames is not None and cycle_frames > 0:
+            idx_end = min(len(t), idx_start + int(cycle_frames))
+        else:
+            idx_end = len(t)
+        # Datos en grados para análisis (recortados)
+        th1_deg = np.rad2deg(P["theta1"][idx_start:idx_end])
+        th2_deg = np.rad2deg(P["theta2"][idx_start:idx_end])
+        w1_deg = np.rad2deg(P["omega1"][idx_start:idx_end])
+        w2_deg = np.rad2deg(P["omega2"][idx_start:idx_end])
+        a1_deg = np.rad2deg(P["alpha1"][idx_start:idx_end])
+        a2_deg = np.rad2deg(P["alpha2"][idx_start:idx_end])
+        
+        # Métricas de demanda
+        omega_norm = np.sqrt(w1_deg**2 + w2_deg**2)
+        alpha_norm = np.sqrt(a1_deg**2 + a2_deg**2)
+        effort = omega_norm + 0.1 * alpha_norm  # Métrica combinada simple
+        
+        # ===== 1. HISTOGRAMA θ1 =====
+        self.ax_hist1.clear()
+        counts1, bins1, _ = self.ax_hist1.hist(th1_deg, bins=40, alpha=0.7, color='tab:blue', edgecolor='black')
+        self.ax_hist1.set_xlabel('θ₁ [°]', fontsize=10)
+        self.ax_hist1.set_ylabel('Frecuencia', fontsize=10)
+        self.ax_hist1.set_title('Distribución de θ₁', fontsize=11, fontweight='bold')
+        self.ax_hist1.grid(True, alpha=0.3)
+        # Marcar ángulo más común
+        most_common_idx1 = np.argmax(counts1)
+        most_common_th1 = (bins1[most_common_idx1] + bins1[most_common_idx1 + 1]) / 2
+        self.ax_hist1.axvline(most_common_th1, color='red', linestyle='--', linewidth=2, label=f'Más común: {most_common_th1:.1f}°')
+        self.ax_hist1.legend(fontsize=9)
+        
+        # ===== 2. HISTOGRAMA θ2 =====
+        self.ax_hist2.clear()
+        counts2, bins2, _ = self.ax_hist2.hist(th2_deg, bins=40, alpha=0.7, color='tab:orange', edgecolor='black')
+        self.ax_hist2.set_xlabel('θ₂ [°]', fontsize=10)
+        self.ax_hist2.set_ylabel('Frecuencia', fontsize=10)
+        self.ax_hist2.set_title('Distribución de θ₂', fontsize=11, fontweight='bold')
+        self.ax_hist2.grid(True, alpha=0.3)
+        most_common_idx2 = np.argmax(counts2)
+        most_common_th2 = (bins2[most_common_idx2] + bins2[most_common_idx2 + 1]) / 2
+        self.ax_hist2.axvline(most_common_th2, color='red', linestyle='--', linewidth=2, label=f'Más común: {most_common_th2:.1f}°')
+        self.ax_hist2.legend(fontsize=9)
+        
+        # ===== 3. HISTOGRAMA 2D (θ1 vs θ2) =====
+        self.ax_hist2d.clear()
+        h, xedges, yedges, im = self.ax_hist2d.hist2d(th1_deg, th2_deg, bins=30, cmap='YlOrRd')
+        self.ax_hist2d.set_xlabel('θ₁ [°]', fontsize=10)
+        self.ax_hist2d.set_ylabel('θ₂ [°]', fontsize=10)
+        self.ax_hist2d.set_title('Combinaciones θ₁-θ₂', fontsize=11, fontweight='bold')
+        cbar = plt.colorbar(im, ax=self.ax_hist2d)
+        cbar.set_label('Frecuencia', fontsize=9)
+        # Marcar combinación más común
+        max_idx = np.unravel_index(np.argmax(h), h.shape)
+        combo_th1 = (xedges[max_idx[0]] + xedges[max_idx[0] + 1]) / 2
+        combo_th2 = (yedges[max_idx[1]] + yedges[max_idx[1] + 1]) / 2
+        self.ax_hist2d.plot(combo_th1, combo_th2, 'b*', markersize=15, label=f'Más común: ({combo_th1:.1f}°, {combo_th2:.1f}°)')
+        self.ax_hist2d.legend(fontsize=8)
+        
+        # ===== 4. DEMANDA DE VELOCIDAD =====
+        self.ax_omega.clear()
+        self.ax_omega.scatter(th1_deg, th2_deg, c=omega_norm, s=5, cmap='viridis', alpha=0.6)
+        cbar_w = plt.colorbar(self.ax_omega.collections[0], ax=self.ax_omega)
+        cbar_w.set_label('|ω| [°/s]', fontsize=9)
+        self.ax_omega.set_xlabel('θ₁ [°]', fontsize=10)
+        self.ax_omega.set_ylabel('θ₂ [°]', fontsize=10)
+        self.ax_omega.set_title('Demanda de Velocidad', fontsize=11, fontweight='bold')
+        self.ax_omega.grid(True, alpha=0.3)
+        # Marcar puntos de mayor velocidad
+        top_omega_idx = np.argsort(omega_norm)[-5:]  # Top 5
+        self.ax_omega.scatter(th1_deg[top_omega_idx], th2_deg[top_omega_idx], 
+                             c='red', s=50, marker='x', linewidths=2, label='Top 5 velocidad')
+        self.ax_omega.legend(fontsize=8)
+        
+        # ===== 5. DEMANDA DE ACELERACIÓN =====
+        self.ax_alpha.clear()
+        self.ax_alpha.scatter(th1_deg, th2_deg, c=alpha_norm, s=5, cmap='plasma', alpha=0.6)
+        cbar_a = plt.colorbar(self.ax_alpha.collections[0], ax=self.ax_alpha)
+        cbar_a.set_label('|α| [°/s²]', fontsize=9)
+        self.ax_alpha.set_xlabel('θ₁ [°]', fontsize=10)
+        self.ax_alpha.set_ylabel('θ₂ [°]', fontsize=10)
+        self.ax_alpha.set_title('Demanda de Aceleración', fontsize=11, fontweight='bold')
+        self.ax_alpha.grid(True, alpha=0.3)
+        top_alpha_idx = np.argsort(alpha_norm)[-5:]
+        self.ax_alpha.scatter(th1_deg[top_alpha_idx], th2_deg[top_alpha_idx], 
+                             c='red', s=50, marker='x', linewidths=2, label='Top 5 aceleración')
+        self.ax_alpha.legend(fontsize=8)
+        
+        # ===== 6. ESFUERZO COMBINADO =====
+        self.ax_effort.clear()
+        self.ax_effort.scatter(th1_deg, th2_deg, c=effort, s=5, cmap='coolwarm', alpha=0.6)
+        cbar_e = plt.colorbar(self.ax_effort.collections[0], ax=self.ax_effort)
+        cbar_e.set_label('Esfuerzo', fontsize=9)
+        self.ax_effort.set_xlabel('θ₁ [°]', fontsize=10)
+        self.ax_effort.set_ylabel('θ₂ [°]', fontsize=10)
+        self.ax_effort.set_title('Esfuerzo Combinado (ω + 0.1α)', fontsize=11, fontweight='bold')
+        self.ax_effort.grid(True, alpha=0.3)
+        top_effort_idx = np.argsort(effort)[-5:]
+        self.ax_effort.scatter(th1_deg[top_effort_idx], th2_deg[top_effort_idx], 
+                              c='red', s=50, marker='x', linewidths=2, label='Top 5 esfuerzo')
+        self.ax_effort.legend(fontsize=8)
+        
+        # ===== 7. TABLA DE ESTADÍSTICAS =====
+        self.ax_stats.clear()
+        self.ax_stats.axis('off')
+        
+        # Calcular estadísticas
+        stats_data = [
+            ['PARÁMETRO', 'θ₁', 'θ₂', 'UNIDAD'],
+            ['─' * 30, '─' * 15, '─' * 15, '─' * 10],
+            ['Más común (histograma)', f'{most_common_th1:.2f}', f'{most_common_th2:.2f}', '°'],
+            ['Combinación más frecuente', f'{combo_th1:.2f}', f'{combo_th2:.2f}', '°'],
+            ['Promedio', f'{np.mean(th1_deg):.2f}', f'{np.mean(th2_deg):.2f}', '°'],
+            ['Desv. estándar', f'{np.std(th1_deg):.2f}', f'{np.std(th2_deg):.2f}', '°'],
+            ['Rango (max-min)', f'{np.ptp(th1_deg):.2f}', f'{np.ptp(th2_deg):.2f}', '°'],
+            ['Mínimo', f'{np.min(th1_deg):.2f}', f'{np.min(th2_deg):.2f}', '°'],
+            ['Máximo', f'{np.max(th1_deg):.2f}', f'{np.max(th2_deg):.2f}', '°'],
+            ['', '', '', ''],
+            ['Velocidad máxima |ω|', f'{np.max(np.abs(w1_deg)):.2f}', f'{np.max(np.abs(w2_deg)):.2f}', '°/s'],
+            ['Velocidad promedio |ω|', f'{np.mean(np.abs(w1_deg)):.2f}', f'{np.mean(np.abs(w2_deg)):.2f}', '°/s'],
+            ['Aceleración máxima |α|', f'{np.max(np.abs(a1_deg)):.2f}', f'{np.max(np.abs(a2_deg)):.2f}', '°/s²'],
+            ['Aceleración promedio |α|', f'{np.mean(np.abs(a1_deg)):.2f}', f'{np.mean(np.abs(a2_deg)):.2f}', '°/s²'],
+            ['', '', '', ''],
+            ['CONDICIONES MÁS DEMANDANTES:', '', '', ''],
+            ['Mayor velocidad en', f'{th1_deg[np.argmax(omega_norm)]:.2f}', f'{th2_deg[np.argmax(omega_norm)]:.2f}', '°'],
+            ['Mayor aceleración en', f'{th1_deg[np.argmax(alpha_norm)]:.2f}', f'{th2_deg[np.argmax(alpha_norm)]:.2f}', '°'],
+            ['Mayor esfuerzo en', f'{th1_deg[np.argmax(effort)]:.2f}', f'{th2_deg[np.argmax(effort)]:.2f}', '°'],
+        ]
+        
+        table = self.ax_stats.table(cellText=stats_data, cellLoc='left', loc='center',
+                                    colWidths=[0.4, 0.2, 0.2, 0.2])
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        # Reducir escala vertical para evitar que la tabla invada filas superiores
+        table.scale(1, 1.3)
+        
+        # Estilo de header
+        for i in range(4):
+            table[(0, i)].set_facecolor('#4CAF50')
+            table[(0, i)].set_text_props(weight='bold', color='white')
+        
+        # Estilo de secciones
+        for row_idx in [15, ]:  # Filas de subtítulos
+            for col_idx in range(4):
+                table[(row_idx, col_idx)].set_facecolor('#E8F5E9')
+                table[(row_idx, col_idx)].set_text_props(weight='bold')
+        
         self.fig.canvas.draw_idle()
 
 # ==============================
@@ -334,13 +564,17 @@ class Simulator:
 def save_trajectory_data(t: np.ndarray, thetas: np.ndarray, 
                          arm_params: ArmParams, tref_spec: TrefoilSpec, 
                          motion: MotionSpec, v_eff: float, idx0: int,
-                         output_dir: str = "trayectorias"):
+                         start_index: int, cycle_frames: int,
+                         output_dir: str = "data/trayectorias"):
     """Guarda parámetros en TXT y serie temporal θ₁,θ₂ en CSV."""
-    os.makedirs(output_dir, exist_ok=True)
+    # Asegurar ruta absoluta relativa al archivo actual (no al CWD)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir_abs = os.path.join(base_dir, output_dir)
+    os.makedirs(out_dir_abs, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # 1) Archivo TXT con parámetros legibles
-    txt_path = os.path.join(output_dir, f"config_{timestamp}.txt")
+    txt_path = os.path.join(out_dir_abs, f"config_{timestamp}.txt")
     with open(txt_path, 'w', encoding='utf-8') as f:
         f.write("=" * 60 + "\n")
         f.write("CONFIGURACIÓN DE TRAYECTORIA 2R - TRÉBOL\n")
@@ -397,12 +631,16 @@ def save_trajectory_data(t: np.ndarray, thetas: np.ndarray,
         f.write("=" * 60 + "\n")
     
     # 2) Archivo CSV con serie temporal
-    csv_path = os.path.join(output_dir, f"trajectory_{timestamp}.csv")
+    csv_path = os.path.join(out_dir_abs, f"trajectory_{timestamp}.csv")
     with open(csv_path, 'w', encoding='utf-8') as f:
         f.write("# Trayectoria 2R - Referencias angulares\n")
         f.write(f"# Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("# theta1: ángulo eslabón 1 desde horizontal [rad]\n")
         f.write("# theta2: ángulo relativo eslabón 2 [rad]\n")
+        # Metadatos para visualización (no afectan el consumo en Arduino)
+        f.write(f"# start_index={start_index}\n")
+        f.write(f"# cycle_frames={cycle_frames}\n")
+        f.write(f"# fps={motion.fps}\n")
         f.write("time_s,theta1_rad,theta2_rad\n")
         for i in range(len(t)):
             f.write(f"{t[i]:.6f},{thetas[i,0]:.6f},{thetas[i,1]:.6f}\n")
@@ -424,12 +662,14 @@ class App:
 
         self.sim=Simulator(self.arm,self.canvas)
         self.prof=ProfilesPlotter()
+        self.analyzer=AngleAnalyzer()  # Nueva ventana de análisis
         
         # Almacenar última trayectoria planificada
         self.last_t = None
         self.last_thetas = None
         self.last_v_eff = None
         self.last_idx0 = None
+        self.last_start_idx = None
         
         self._build_controls()
         self._try_plan_and_load()  # plan inicial (no arranca animación)
@@ -494,16 +734,22 @@ class App:
         try:
             self.arm_params.check_reach_requirement()
             planner=TrajectoryPlanner(self.arm, self.tref, self.motion)
-            t, ref_xy, thetas, v_eff, idx0 = planner.build()
+            t, ref_xy, thetas, v_eff, idx0, start_idx, cycle_frames = planner.build()
             
             # Guardar datos de la planificación
             self.last_t = t
             self.last_thetas = thetas
             self.last_v_eff = v_eff
             self.last_idx0 = idx0
+            self.last_start_idx = start_idx
+            self.last_cycle_frames = cycle_frames
             
+            # Simulación: cargar la secuencia completa (incluye dwell + blend + todas las vueltas)
             self.sim.load(t, ref_xy, thetas, self.motion.fps)
-            self.prof.update(t, thetas, self.motion.fps)
+            self.prof.update(t, thetas, self.motion.fps, skip_initial=True,
+                             start_index=self.last_start_idx, cycle_frames=self.last_cycle_frames)
+            self.analyzer.analyze(t, thetas, self.motion.fps, skip_initial=True,
+                                  start_index=self.last_start_idx, cycle_frames=self.last_cycle_frames)
             self.sim.status.set_text(f"OK (v efectiva={v_eff:.2f} cm/s, inicio idx={idx0})")
             return True
         except Exception as e:
@@ -519,11 +765,16 @@ class App:
                 txt_path, csv_path = save_trajectory_data(
                     self.last_t, self.last_thetas,
                     self.arm_params, self.tref_spec, self.motion,
-                    self.last_v_eff, self.last_idx0
+                    self.last_v_eff, self.last_idx0,
+                    self.last_start_idx, self.last_cycle_frames
                 )
                 print(f"✓ Archivos guardados:")
                 print(f"  - Configuración: {txt_path}")
                 print(f"  - Trayectoria CSV: {csv_path}")
+                try:
+                    self.sim.status.set_text(f"Guardado: {os.path.basename(txt_path)}, {os.path.basename(csv_path)}")
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"⚠ Error al guardar archivos: {e}")
             
