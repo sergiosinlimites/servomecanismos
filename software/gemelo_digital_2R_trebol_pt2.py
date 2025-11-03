@@ -782,7 +782,7 @@ def save_trajectory_data(t: np.ndarray, thetas: np.ndarray,
 class App:
     def __init__(self):
         self.canvas=Canvas()
-        self.arm_params=ArmParams(d1=20.0*CM,d2=18.0*CM); self.arm_params.check_reach_requirement()
+        self.arm_params=ArmParams(d1=25.0*CM,d2=18.0*CM); self.arm_params.check_reach_requirement()
         self.arm=Arm2R(self.arm_params)
         self.tref_spec=TrefoilSpec(a=4,b=math.pi/2,M=0.3,scale_cm=7.5*CM,center=(10.0*CM,10.0*CM))
         self.tref=TrefoilGenerator(self.tref_spec,self.canvas)
