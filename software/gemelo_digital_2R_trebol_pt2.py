@@ -765,15 +765,16 @@ class SerialStreamer:
                 except Exception:
                     pass
                 time.sleep(0.0005)
-            # enviar comando R
+            # enviar comando R con tiempo de PC para verificación de timing
             try:
-                cmd = f"R,{thetas[i,0]:.6f},{thetas[i,1]:.6f}\n".encode('ascii')
+                pc_elapsed = (time.perf_counter() - t0)
+                cmd = f"R,{thetas[i,0]:.6f},{thetas[i,1]:.6f},{pc_elapsed:.6f}\n".encode('ascii')
                 ser.write(cmd)
                 # Log TX con rad y grados
                 try:
                     th1 = thetas[i,0]; th2 = thetas[i,1]
                     self._log_q.put_nowait(
-                        f"TX R, th1={th1:.3f} rad ({np.degrees(th1):.1f}°), th2={th2:.3f} rad ({np.degrees(th2):.1f}°)")
+                        f"TX R, tpc={pc_elapsed:.3f}s, th1={th1:.3f} rad ({np.degrees(th1):.1f}°), th2={th2:.3f} rad ({np.degrees(th2):.1f}°)")
                 except Exception:
                     pass
             except Exception:

@@ -82,6 +82,8 @@ uint32_t lastPrint = 0;
 // Telemetría
 const uint32_t TEL_MS = 50;      // Período de telemetría (50 ms = ~20 Hz)
 uint32_t lastTel = 0;
+// Tiempo de PC recibido (opcional, para validación de timing)
+float pc_time_s = 0.0f;
 
 // Función de utilidad para envolver ángulo a [-π, π]
 float wrapToPi(float a) {
@@ -190,7 +192,7 @@ void calibracion(void) {
         float u1_norm = clampf(u_n_1 / Uunits, -1.0f, 1.0f);
         float u2_norm = clampf(u_n_2 / Uunits, -1.0f, 1.0f);
         
-        // Telemetría en formato Y,millis,q1,q2,q1_ref,q2_ref,u1,u2
+        // Telemetría en formato Y,millis,q1,q2,q1_ref,q2_ref,u1,u2[,pc_time_s]
         if (currentMillis - lastTel >= TEL_MS) {
             lastTel = currentMillis;
             Serial.print('Y'); Serial.print(',');
@@ -200,7 +202,9 @@ void calibracion(void) {
             Serial.print(Ref_1, 6); Serial.print(',');
             Serial.print(Ref_2, 6); Serial.print(',');
             Serial.print(u1_norm, 3); Serial.print(',');
-            Serial.println(u2_norm, 3);
+            Serial.print(u2_norm, 3);
+            Serial.print(',');
+            Serial.println(pc_time_s, 6);
         }
     }
 
@@ -237,12 +241,14 @@ void processLine() {
     if (lineLen == 0) return;
 
     if (lineBuf[0] == 'R') {
-        // R,theta1,theta2 (radianes)
-        float a, b; 
-        if (sscanf(lineBuf, "R,%f,%f", &a, &b) == 2) {
+        // R,theta1,theta2[,pc_time_s] (radianes)
+        float a, b, tpc; 
+        int n = sscanf(lineBuf, "R,%f,%f,%f", &a, &b, &tpc);
+        if (n >= 2) {
             noInterrupts(); 
             Ref_1 = a; 
             Ref_2 = b; 
+            if (n >= 3) { pc_time_s = tpc; }
             interrupts();
         }
     } else if (lineBuf[0] == 'P') {
