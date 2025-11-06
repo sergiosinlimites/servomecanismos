@@ -24,6 +24,7 @@ from typing import Tuple, Optional
 import threading
 import time
 import csv
+import queue
 try:
     import serial  # pyserial
 except Exception:
@@ -313,6 +314,29 @@ class ProfilesPlotter:
             for ax in self.axs: ax.relim(); ax.autoscale_view()
         self.fig.canvas.draw_idle()
 
+# ==============================
+# Consola Serial (logs en vivo)
+# ==============================
+
+class SerialConsole:
+    def __init__(self, max_lines: int = 300):
+        self.max_lines = max_lines
+        self.lines = []
+        self.fig, self.ax = plt.subplots(figsize=(8, 6))
+        self.fig.canvas.manager.set_window_title("Consola Serial")
+        self.ax.axis('off')
+        self._text = self.ax.text(0.01, 0.99, "", va='top', ha='left',
+                                   family='monospace', fontsize=9, transform=self.ax.transAxes)
+
+    def append_lines(self, new_lines):
+        if not new_lines:
+            return
+        self.lines.extend(new_lines)
+        if len(self.lines) > self.max_lines:
+            self.lines = self.lines[-self.max_lines:]
+        self._text.set_text("\n".join(self.lines))
+        self.fig.canvas.draw_idle()
+
     def overlay_real(self, t_plot: np.ndarray, theta1_deg: np.ndarray, theta2_deg: np.ndarray):
         if self.real_lines is None:
             lr1,=self.axs[0].plot(t_plot, theta1_deg, 'b--', alpha=0.7, label="θ1 real")
@@ -528,6 +552,7 @@ class Simulator:
         plt.subplots_adjust(bottom=0.42)
         self._setup_scene()
         self.anim=None; self.running=False
+        self._timer=None; self._frame_idx=0; self._t0=None
 
     def _setup_scene(self):
         x0,y0=self.arm.params.base
@@ -553,6 +578,7 @@ class Simulator:
         self.link1_line.set_data([self.arm.params.base[0],x1],[self.arm.params.base[1],y1])
         self.link2_line.set_data([x1,x2],[y1,y2]); self.elbow_dot.set_data([x1],[y1]); self.tip_dot.set_data([x2],[y2])
         self.fig.canvas.draw_idle()
+        self._frame_idx = 0
 
     def _frame(self,i):
         t1,t2=self.thetas[i]; (x1,y1),(x2,y2)=self.arm.fkine(t1,t2)
@@ -566,15 +592,70 @@ class Simulator:
     def _init_anim(self):
         return (self.link1_line,self.link2_line,self.elbow_dot,self.tip_trace,self.tip_dot,self.text)
 
+    def _tick(self):
+        # Calcular índice objetivo por tiempo real y reproducir CADA frame hasta alcanzarlo
+        try:
+            if self._t0 is None:
+                self._t0 = time.perf_counter()
+            elapsed = time.perf_counter() - self._t0
+            i_target = int(np.searchsorted(self.t, elapsed, side='right'))
+        except Exception:
+            i_target = self._frame_idx
+        i_target = max(0, min(i_target, len(self.t)-1))
+
+        if self._frame_idx >= len(self.t):
+            try:
+                if self._timer is not None: self._timer.stop()
+            except Exception:
+                pass
+            self.running=False
+            return
+        try:
+            # Reproducir frames intermedios para no saltar puntos
+            if i_target < self._frame_idx:
+                # reinicio de tiempo o atraso negativo: mantener frame actual
+                i_target = self._frame_idx
+            for k in range(self._frame_idx, i_target+1):
+                self._frame(k)
+            self.fig.canvas.draw_idle()
+        except Exception:
+            pass
+        self._frame_idx = i_target + 1
+
     def start(self):
-        if self.anim is not None: del self.anim
-        self.anim=FuncAnimation(self.fig,self._frame,frames=len(self.t),
-                                init_func=self._init_anim, interval=1000.0/self.fps, blit=True, repeat=False)
-        self.running=True
+        # Usar un timer de GUI para independizar la animación del hilo serial
+        try:
+            if self._timer is None:
+                self._timer = self.fig.canvas.new_timer(interval=max(1, int(1000.0/self.fps)))
+                self._timer.add_callback(self._tick)
+            else:
+                self._timer.stop()
+            self._frame_idx = 0
+            self._t0 = None
+            self._timer.start()
+            self.running=True
+        except Exception:
+            # Fallback a FuncAnimation si el timer falla
+            if self.anim is not None: del self.anim
+            self.anim=FuncAnimation(self.fig,self._frame,frames=len(self.t),
+                                    init_func=self._init_anim, interval=1000.0/self.fps, blit=False, repeat=False)
+            try:
+                self.anim.event_source.start()
+            except Exception:
+                pass
+            self.running=True
 
     def stop(self):
+        try:
+            if self._timer is not None:
+                self._timer.stop()
+        except Exception:
+            pass
         if self.anim is not None and self.running:
-            self.anim.event_source.stop()
+            try:
+                self.anim.event_source.stop()
+            except Exception:
+                pass
         self.running=False
 
 # ==============================
@@ -590,13 +671,22 @@ class SerialStreamer:
         self._stop = threading.Event()
         self.telemetry_rows = []  # (pc_time_s, arduino_ms, q1, q2, q1_ref, q2_ref, u1, u2)
         self._ser = None
+        self._log_q: "queue.Queue[str]" = queue.Queue()
 
     def start(self, t: np.ndarray, thetas: np.ndarray) -> bool:
         if serial is None:
+            try:
+                print("[Serial] pyserial no disponible. Instala con: pip install pyserial")
+            except Exception:
+                pass
             return False
         try:
             self._ser = serial.Serial(self.port, self.baud, timeout=0.02)
-        except Exception:
+        except Exception as e:
+            try:
+                print(f"[Serial] Error al abrir {self.port}@{self.baud}: {e}")
+            except Exception:
+                pass
             return False
         self._stop.clear()
         self.thread = threading.Thread(target=self._run, args=(t, thetas), daemon=True)
@@ -623,6 +713,10 @@ class SerialStreamer:
         # Cero rápido
         try:
             ser.write(b'Z\n'); ser.flush()
+            try:
+                self._log_q.put_nowait("TX Z")
+            except Exception:
+                pass
         except Exception:
             pass
         t0 = time.perf_counter()
@@ -662,6 +756,12 @@ class SerialStreamer:
                                         continue
                                     pc_time = time.perf_counter() - t0
                                     self.telemetry_rows.append((pc_time, ar_ms, q1, q2, q1r, q2r, u1, u2))
+                                    # Log RX compacto
+                                    try:
+                                        self._log_q.put_nowait(
+                                            f"RX Y,t={ar_ms}, q1={q1:.3f}, q2={q2:.3f}, q1r={q1r:.3f}, q2r={q2r:.3f}, u1={u1:.3f}, u2={u2:.3f}")
+                                    except Exception:
+                                        pass
                 except Exception:
                     pass
                 time.sleep(0.0005)
@@ -669,6 +769,13 @@ class SerialStreamer:
             try:
                 cmd = f"R,{thetas[i,0]:.6f},{thetas[i,1]:.6f}\n".encode('ascii')
                 ser.write(cmd)
+                # Log TX con rad y grados
+                try:
+                    th1 = thetas[i,0]; th2 = thetas[i,1]
+                    self._log_q.put_nowait(
+                        f"TX R, th1={th1:.3f} rad ({np.degrees(th1):.1f}°), th2={th2:.3f} rad ({np.degrees(th2):.1f}°)")
+                except Exception:
+                    pass
             except Exception:
                 pass
             i += 1
@@ -684,6 +791,15 @@ class SerialStreamer:
                 w.writerows(self.telemetry_rows)
         except Exception:
             pass
+
+    def drain_log(self):
+        lines = []
+        try:
+            while True:
+                lines.append(self._log_q.get_nowait())
+        except Exception:
+            pass
+        return lines
 
 # ==============================
 # Guardado de datos
@@ -796,6 +912,8 @@ class App:
         self.sim=Simulator(self.arm,self.canvas)
         self.prof=ProfilesPlotter()
         self.analyzer=AngleAnalyzer()  # Nueva ventana de análisis
+        self.console=SerialConsole(max_lines=300)
+        self._console_timer = None
         
         # Almacenar última trayectoria planificada
         self.last_t = None
@@ -832,6 +950,9 @@ class App:
         ax_port = fig.add_axes([0.10,0.07,0.22,0.035])
         ax_baud = fig.add_axes([0.36,0.07,0.22,0.035])
         ax_chk  = fig.add_axes([0.62,0.07,0.26,0.04])
+        # Consola serial embebida (justo debajo del área del gráfico, en el pequeño espacio disponible)
+        ax_console = fig.add_axes([0.10, 0.385, 0.80, 0.03])
+        ax_console.axis('off')
 
         self.s_a     = Slider(ax_a,    "a (lóbulos)", 1, 12, valinit=self.tref_spec.a, valstep=1)
         self.s_b_deg = Slider(ax_bdeg, "b (°)", 0, 360, valinit=np.rad2deg(self.tref_spec.b))
@@ -854,6 +975,11 @@ class App:
         self.txt_port = TextBox(ax_port, "Puerto ", initial=str(self.serial_port))
         self.txt_baud = TextBox(ax_baud, "Baudios ", initial=str(self.serial_baud))
         self.chk_serial = CheckButtons(ax_chk, ["Serial"], [self.serial_enabled])
+        # Texto de consola (monoespaciado) y buffer
+        self.ax_console = ax_console
+        self.console_text = ax_console.text(0.0, 1.0, "", transform=ax_console.transAxes,
+                                            va='top', ha='left', family='monospace', fontsize=8)
+        self.console_lines = []  # últimas líneas mostradas
 
         self.btn_start.on_clicked(self._on_start)
         self.btn_stop.on_clicked(self._on_stop)
@@ -934,6 +1060,19 @@ class App:
                 print(f"⚠ Error al guardar archivos: {e}")
             # Iniciar streaming Serial → Arduino (si está habilitado)
             if self.serial_enabled:
+                # Tomar puerto/baudios desde las cajas de texto aunque no se haya presionado Enter
+                try:
+                    port_text = getattr(self.txt_port, 'text', str(self.serial_port))
+                    if isinstance(port_text, str) and port_text.strip():
+                        self.serial_port = port_text.strip()
+                except Exception:
+                    pass
+                try:
+                    baud_text = getattr(self.txt_baud, 'text', str(self.serial_baud))
+                    if isinstance(baud_text, str) and baud_text.strip():
+                        self.serial_baud = int(baud_text.strip())
+                except Exception:
+                    pass
                 telem_path = os.path.join(os.path.dirname(txt_path), os.path.basename(txt_path).replace('config_', 'telemetry_').replace('.txt', '.csv'))
                 self.streamer = SerialStreamer(self.serial_port, self.serial_baud, os.path.dirname(txt_path))
                 started = self.streamer.start(self.last_t, self.last_thetas)
@@ -941,6 +1080,34 @@ class App:
                     self.sim.status.set_text("Serial NO iniciado (revise puerto/pyserial)")
                 else:
                     self.sim.status.set_text(f"Serial {self.serial_port}@{self.serial_baud} activo…")
+                    # Iniciar temporizador para actualizar la consola serial
+                    try:
+                        if self._console_timer is None:
+                            self._console_timer = self.sim.fig.canvas.new_timer(interval=200)
+                            def _tick():
+                                try:
+                                    if self.streamer is not None:
+                                        lines = self.streamer.drain_log()
+                                        if lines:
+                                            # Ventana externa (si está) y consola embebida
+                                            try:
+                                                self.console.append_lines(lines)
+                                            except Exception:
+                                                pass
+                                            self.console_lines.extend(lines)
+                                            # Limitar a 4 líneas para caber en el área embebida
+                                            self.console_lines = self.console_lines[-4:]
+                                            self.console_text.set_text("\n".join(self.console_lines))
+                                            try:
+                                                self.ax_console.figure.canvas.draw_idle()
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    pass
+                            self._console_timer.add_callback(_tick)
+                        self._console_timer.start()
+                    except Exception:
+                        pass
             self.sim.start()
 
     def _on_stop(self, _evt):
@@ -948,6 +1115,12 @@ class App:
         # Detener streamer y registrar telemetría + overlay
         if self.streamer is not None:
             self.streamer.stop()
+            # Detener temporizador de consola
+            try:
+                if self._console_timer is not None:
+                    self._console_timer.stop()
+            except Exception:
+                pass
             # Guardar telemetría
             out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'trayectorias')
             os.makedirs(out_dir, exist_ok=True)
