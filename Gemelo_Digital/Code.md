@@ -1,6 +1,6 @@
 # 🌿 Simulación de Brazo Robótico 2DOF — Trayectoria en forma de Trébol
 
-![Simulación del Gemelo Digital](1.jpg)
+
 
 ## 🧠 Descripción General
 
