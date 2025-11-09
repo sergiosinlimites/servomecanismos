@@ -1,5 +1,6 @@
 # 🌿 Simulación de Brazo Robótico 2DOF — Trayectoria en forma de Trébol
 
+![1](https://github.com/user-attachments/assets/c9a99b39-a7e0-473f-85a2-2ee450f27526)
 
 
 ## 🧠 Descripción General
