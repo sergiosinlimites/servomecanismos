@@ -1,0 +1,197 @@
+:root {
+  --bg: #0f1216;
+  --panel: #161b22;
+  --panel-2: #0f1720;
+  --text: #e6edf3;
+  --muted: #9ba3af;
+  --accent: #4ea1ff;
+  --warn: #ff6b6b;
+  --ok: #5bd487;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, sans-serif;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #1f2733;
+  background: #0c1015;
+}
+.app-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.status { color: var(--muted); font-size: 13px; }
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+}
+
+.section { width: 100%; }
+.section-title { margin: 4px 0 10px 0; font-size: 16px; font-weight: 600; color: var(--text); }
+
+.left-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.controls, .serial-controls, .save-controls {
+  background: var(--panel);
+  border: 1px solid #1f2733;
+  border-radius: 8px;
+  padding: 12px;
+  width: 100%;
+}
+.serial-controls h2 { margin: 0 0 8px 0; font-size: 15px; }
+.controls h2, .serial-controls h2, .save-controls h2 {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+}
+label { color: var(--muted); font-size: 13px; }
+input[type="number"], input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid #213044;
+  border-radius: 6px;
+}
+input[type="checkbox"] { transform: scale(1.2); }
+
+.buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+button {
+  padding: 8px 12px;
+  background: #101826;
+  border: 1px solid #213044;
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+}
+button:hover { background: #0f2238; }
+button.warn { background: #2d1516; border-color: #442225; color: #ffd6d6; }
+button.warn:hover { background: #3a1b1d; }
+
+.console {
+  margin-top: 10px;
+}
+.console h3 {
+  margin: 0 0 6px 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+#serialConsole {
+  height: 140px;
+  overflow: auto;
+  padding: 8px;
+  background: #0b1016;
+  border: 1px solid #1f2733;
+  border-radius: 6px;
+  color: #bbd2ff;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.right-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.display {
+  background: var(--panel);
+  border: 1px solid #1f2733;
+  border-radius: 8px;
+  padding: 10px;
+  width: 100%;
+}
+.sim-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) 380px;
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .sim-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.sim-controls { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+#armCanvas {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #0b1016;
+  border: 1px solid #1f2733;
+  border-radius: 8px;
+  display: block;
+}
+
+.plots-grid, .analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.plot {
+  width: 100%;
+  height: 280px;
+  background: #0b1016;
+  border: 1px solid #1f2733;
+  border-radius: 8px;
+}
+.plot.small { height: 240px; }
+.stats-table {
+  background: var(--panel);
+  border: 1px solid #1f2733;
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text);
+  font-size: 13px;
+  width: 100%;
+}
+.stats-table table { width: 100%; border-collapse: collapse; }
+.stats-table th, .stats-table td {
+  border-bottom: 1px solid #1f2733;
+  padding: 6px 8px;
+}
+.stats-table th { text-align: left; color: var(--muted); font-weight: 500; }
+
+/* Consola Serial sección dedicada */
+#serialConsole {
+  height: 240px;
+  overflow: auto;
+  padding: 10px;
+  background: #0b1016;
+  border: 1px solid #1f2733;
+  border-radius: 8px;
+  color: #bbd2ff;
+  font-size: 12px;
+  line-height: 1.35;
+  width: 100%;
+}
+
+

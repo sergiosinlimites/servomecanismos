@@ -17,21 +17,12 @@
 // ================== CONFIG PWM / CONTROL ==================
 #define PWM_MAX        255          // analogWrite 0–255
 
-// Estos quedan definidos pero YA NO se usan directamente en el control.
-#define MIN_DUTY_1_HOLD    90       // PWM para sostener brazo 1 en posición
-#define MIN_DUTY_1_MOVE_L  200      // PWM mínimo para mover M1 si ángulo < 100°
-#define MIN_DUTY_1_MOVE_H  190      // PWM mínimo para mover M1 si ángulo >= 100°
+// Valores mínimos medidos para que arranque cada motor
+#define MIN_DUTY_1     90           // PWM mínimo motor 1 para moverse
+#define MIN_DUTY_2     5            // PWM mínimo motor 2 para moverse
+#define MAX_DUTY_2     30           // PWM máximo motor 2 (tú lo mediste así)
 
-#define MIN_DUTY_2      5           // PWM mínimo motor 2
-#define MAX_DUTY_2      30          // PWM máximo motor 2
-
-// Deadband alrededor de la referencia (la uso en M2)
-#define DEAD_BAND_DEG   2.0f        
-
-// Saturaciones de esfuerzo del controlador (en “unidades PWM” aprox)
-const float U1_MAX      = 255.0f;   // Máximo esfuerzo M1 (general)
-const float U1_MAX_DOWN = 40.0f;    // Máximo empuje HACIA ABAJO en M1 (limitado)
-const float U2_MAX      = 60.0f;    // Máximo esfuerzo M2
+#define DEAD_BAND_DEG  1.0f         // si |error| < 1°, lo consideramos en posición
 
 // +1 = como está ahora, -1 = invierte sentido lógico eje 1 (por hardware)
 #define M1_DIR_INV     (+1)
@@ -41,14 +32,10 @@ unsigned long previousMillis = 0;
 const unsigned long Ts = 50;        // Periodo de control = 50 ms (~20 Hz)
 
 // ================== MEDICIÓN ÁNGULOS ==================
-float angulo_1 = 0.0f;              // Ángulo motor 1 en grados (filtrado, continuo)
+float angulo_1 = 0.0f;              // Ángulo motor 1 en grados [0,360)
 float angulo_2 = 0.0f;              // Ángulo motor 2 en grados [0,360)
-float angulo_1_rad = 0.0f;          // Ángulo motor 1 en radianes
+float angulo_1_rad = 0.0f;          // Ángulo motor 1 en radianes [-pi,pi]
 float angulo_2_rad = 0.0f;          // Ángulo motor 2 en radianes [-pi,pi]
-
-// Filtro simple para el ángulo 1 (anti-salto)
-float angulo_1_filtrado = 0.0f;
-bool  ang1_filt_init    = false;
 
 // Offsets (posición "cero" en ranuras)
 volatile int32_t slotOffset_1 = 0;
@@ -64,28 +51,20 @@ float Ref1_int_deg = 0.0f;
 float Ref2_int_deg = 0.0f;
 bool  refIntInit   = false;
 
-// Rampa de referencia (suave, para no pegar brincos)
-const float STEP_FAST   = 2.0f;     // lejos
-const float STEP_MEDIUM = 1.0f;     // medio
-const float STEP_SLOW   = 0.5f;     // cerca
+// Rampa de referencia (valores máximos de paso por ciclo)
+const float STEP_FAST   = 3.0f;     // lejos
+const float STEP_MEDIUM = 2.0f;     // medio
+const float STEP_SLOW   = 1.0f;     // cerca
 
-// ===== Ganancias PID (valores de arranque; ajustables por serial) =====
-float k_p_1 = 1.0f;                 // motor 1
-float k_p_2 = 1.0f;                 // motor 2
+// ====== Ganancias PID (iniciales, LAS VAS A TUNEAR) ======
+float k_p_1 = 2.0f, k_i_1 = 0.5f,  k_d_1 = 0.1f;    // Motor 1
+float k_p_2 = 3.0f, k_i_2 = 0.8f,  k_d_2 = 0.15f;   // Motor 2
 
-float k_i_1 = 0.3f;                 // integral M1
-float k_i_2 = 0.0f;                 // integral M2
-
-float k_d_1 = 0.6f;                 // derivativo motor 1
-float k_d_2 = 0.05f;                // derivativo motor 2
-
-// Errores previos para el término D
+// ====== Estados del PID ======
 float e1_prev_deg = 0.0f;
 float e2_prev_deg = 0.0f;
-
-// Integrales del error
-float e1_int_deg = 0.0f;
-float e2_int_deg = 0.0f;
+float i1_term     = 0.0f;   // integral motor 1
+float i2_term     = 0.0f;   // integral motor 2
 
 // Flag de STOP
 bool stopAll = false;
@@ -109,7 +88,7 @@ volatile int8_t dirSign_2 = +1;
 
 // ================== DEBUG / TELEMETRÍA ==================
 unsigned long lastPrint = 0;
-const unsigned long PRINT_MS = 50;
+const unsigned long PRINT_MS = 200;
 
 uint8_t duty1 = 0;
 uint8_t duty2 = 0;
@@ -148,6 +127,14 @@ void isrSlot2() {
   lastUs_2 = now_2;
 }
 
+// ================== RESET ESTADOS PID ==================
+void resetPID() {
+  e1_prev_deg = 0.0f;
+  e2_prev_deg = 0.0f;
+  i1_term     = 0.0f;
+  i2_term     = 0.0f;
+}
+
 // ================== COMANDOS SERIALES ==================
 void leerComandosSerial() {
   while (Serial.available() > 0) {
@@ -160,19 +147,10 @@ void leerComandosSerial() {
       noInterrupts();
       Ref_1 = a;
       Ref_2 = b;
-      stopAll     = false;
-      refIntInit  = false;   // reenganchar referencia interna
-      e1_prev_deg = 0.0f;
-      e2_prev_deg = 0.0f;
-      e1_int_deg  = 0.0f;
-      e2_int_deg  = 0.0f;
+      stopAll   = false;
+      refIntInit = false;   // para volver a enganchar la referencia interna
+      resetPID();
       interrupts();
-
-      // Consumir cualquier campo extra hasta fin de línea (p. ej., timestamp enviado por el simulador)
-      while (Serial.available() > 0) {
-        char d = Serial.read();
-        if (d == '\n' || d == '\r') break;
-      }
 
       Serial.print(F("Nuevas refs -> Ref_1="));
       Serial.print(Ref_1, 4);
@@ -201,8 +179,8 @@ void leerComandosSerial() {
       noInterrupts();
       k_i_1 = i1;
       k_i_2 = i2;
-      e1_int_deg = 0.0f;
-      e2_int_deg = 0.0f;
+      i1_term = 0.0f;
+      i2_term = 0.0f;
       interrupts();
 
       Serial.print(F("Nuevos Ki -> k_i_1="));
@@ -228,14 +206,8 @@ void leerComandosSerial() {
       noInterrupts();
       slotOffset_1 = slotCount_1;
       slotOffset_2 = slotCount_2;
-      refIntInit   = false;
-      e1_prev_deg  = 0.0f;
-      e2_prev_deg  = 0.0f;
-      e1_int_deg   = 0.0f;
-      e2_int_deg   = 0.0f;
-      // reinicio filtro de ángulo
-      ang1_filt_init    = false;
-      angulo_1_filtrado = 0.0f;
+      refIntInit   = false;  // re-inicializar ref interna en la nueva posición
+      resetPID();
       interrupts();
 
       Serial.println(F("Cero recalibrado (Z)."));
@@ -244,10 +216,7 @@ void leerComandosSerial() {
       stopAll = true;
       analogWrite(OutputPWM_GPIO_1, 0);
       analogWrite(OutputPWM_GPIO_2, 0);
-      e1_prev_deg  = 0.0f;
-      e2_prev_deg  = 0.0f;
-      e1_int_deg   = 0.0f;
-      e2_int_deg   = 0.0f;
+      resetPID();
       Serial.println(F("Motores detenidos (S)."));
     }
   }
@@ -262,7 +231,7 @@ void controlStep() {
   }
   previousMillis = now;
 
-  float Ts_s = (float)Ts / 1000.0f;   // periodo en segundos
+  float Ts_s = (float)Ts / 1000.0f;
 
   // Actualizar ángulos desde los encoders
   int32_t slots_1, slots_2;
@@ -271,33 +240,17 @@ void controlStep() {
   slots_2 = slotCount_2;
   interrupts();
 
-  // ----- Encoder 1 (con filtro anti-salto) -----
-  int32_t rel_1   = slots_1 - slotOffset_1;
+  // ----- Encoder 1 -----
+  int32_t rel_1 = slots_1 - slotOffset_1;
   float   turns_1 = (float)rel_1 / (float)SLOTS_PER_REV_1;
-  float   deg_1   = turns_1 * 360.0f;   // sin mod 360, ángulo "crudo"
+  float   deg_1   = turns_1 * 360.0f;
+  float aux1 = fmod(deg_1, 360.0f);
+  if (aux1 < 0) aux1 += 360.0f;
+  angulo_1     = aux1;
+  angulo_1_rad = wrapToPi(turns_1 * 2.0f * PI);
 
-  // Inicializar el filtro la primera vez
-  if (!ang1_filt_init) {
-    angulo_1_filtrado = deg_1;
-    ang1_filt_init    = true;
-  }
-
-  float delta_deg = deg_1 - angulo_1_filtrado;
-
-  // Máximo cambio razonable de ángulo por ciclo (ajústalo si hace falta)
-  const float MAX_DEG_STEP_1 = 10.0f; // 10° cada 50 ms ~ 200°/s
-
-  if (delta_deg >  MAX_DEG_STEP_1) delta_deg =  MAX_DEG_STEP_1;
-  if (delta_deg < -MAX_DEG_STEP_1) delta_deg = -MAX_DEG_STEP_1;
-
-  angulo_1_filtrado += delta_deg;
-
-  // Ángulos "oficiales" de M1
-  angulo_1     = angulo_1_filtrado;               // grados (continuo)
-  angulo_1_rad = angulo_1_filtrado * PI / 180.0f; // radianes
-
-  // ----- Encoder 2 (como antes) -----
-  int32_t rel_2   = slots_2 - slotOffset_2;
+  // ----- Encoder 2 -----
+  int32_t rel_2 = slots_2 - slotOffset_2;
   float   turns_2 = (float)rel_2 / (float)SLOTS_PER_REV_2;
   float   deg_2   = turns_2 * 360.0f;
   float aux2 = fmod(deg_2, 360.0f);
@@ -313,8 +266,6 @@ void controlStep() {
   }
 
   if (stopAll) {
-    duty1 = 0;
-    duty2 = 0;
     analogWrite(OutputPWM_GPIO_1, 0);
     analogWrite(OutputPWM_GPIO_2, 0);
   } else {
@@ -323,38 +274,38 @@ void controlStep() {
     float Ref2_cmd_deg = Ref_2 * 180.0f / PI;
 
     // Rampa no lineal para motor 1
-    float diffRef1 = Ref1_cmd_deg - Ref1_int_deg;
-    float dist1    = fabs(diffRef1);
+    float diff1 = Ref1_cmd_deg - Ref1_int_deg;
+    float dist1 = fabs(diff1);
     float step1;
     if (dist1 > 40.0f)      step1 = STEP_FAST;    // lejos
     else if (dist1 > 15.0f) step1 = STEP_MEDIUM;  // medio
     else                    step1 = STEP_SLOW;    // cerca
 
-    if (fabs(diffRef1) <= step1) {
+    if (fabs(diff1) <= step1) {
       Ref1_int_deg = Ref1_cmd_deg;
     } else {
-      Ref1_int_deg += (diffRef1 > 0.0f ? step1 : -step1);
+      Ref1_int_deg += (diff1 > 0.0f ? step1 : -step1);
     }
 
-    // Rampa no lineal también para motor 2
-    float diffRef2 = Ref2_cmd_deg - Ref2_int_deg;
-    float dist2    = fabs(diffRef2);
+    // Rampa no lineal para motor 2
+    float diff2 = Ref2_cmd_deg - Ref2_int_deg;
+    float dist2 = fabs(diff2);
     float step2;
     if (dist2 > 40.0f)      step2 = STEP_FAST;
     else if (dist2 > 15.0f) step2 = STEP_MEDIUM;
     else                    step2 = STEP_SLOW;
 
-    if (fabs(diffRef2) <= step2) {
+    if (fabs(diff2) <= step2) {
       Ref2_int_deg = Ref2_cmd_deg;
     } else {
-      Ref2_int_deg += (diffRef2 > 0.0f ? step2 : -step2);
+      Ref2_int_deg += (diff2 > 0.0f ? step2 : -step2);
     }
 
-    // ----- Control en grados usando referencia interna -----
+    // ----- Errores en grados (usando referencia interna) -----
     float e1_deg = Ref1_int_deg - angulo_1;
     float e2_deg = Ref2_int_deg - angulo_2;
 
-    // Envolvente [-180,180] (para rangos menores a 180° no afecta)
+    // Envolvente opcional [-180,180] para evitar caminos largos
     if (e1_deg > 180.0f) e1_deg -= 360.0f;
     if (e1_deg < -180.0f) e1_deg += 360.0f;
     if (e2_deg > 180.0f) e2_deg -= 360.0f;
@@ -363,80 +314,80 @@ void controlStep() {
     dbg_e1_deg = e1_deg;
     dbg_e2_deg = e2_deg;
 
-    // ===== Derivadas del error (para D) =====
-    float de1_deg = (e1_deg - e1_prev_deg) / Ts_s;
-    float de2_deg = (e2_deg - e2_prev_deg) / Ts_s;
-    e1_prev_deg = e1_deg;
-    e2_prev_deg = e2_deg;
-
-    // ===== Integrales del error (para I) =====
-    e1_int_deg += e1_deg * Ts_s;
-    e2_int_deg += e2_deg * Ts_s;
-
-    // AUMENTAMOS EL MÁXIMO DEL INTEGRADOR PARA M1
-    const float I1_MAX = 2000.0f;   // << antes 300.0f
-    const float I2_MAX = 200.0f;
-
-    if (e1_int_deg >  I1_MAX) e1_int_deg =  I1_MAX;
-    if (e1_int_deg < -I1_MAX) e1_int_deg = -I1_MAX;
-
-    if (e2_int_deg >  I2_MAX) e2_int_deg =  I2_MAX;
-    if (e2_int_deg < -I2_MAX) e2_int_deg = -I2_MAX;
-
-    // ====================== MOTOR 1: PI-D con limitación de empuje hacia abajo ======================
-    float u1 = k_p_1 * e1_deg + k_i_1 * e1_int_deg + k_d_1 * de1_deg;
-
-    // Saturación general
-    u1 = clampf(u1, -U1_MAX, U1_MAX);
-
-    // Si estamos por ENCIMA de la referencia (e1 < 0) y el control va hacia abajo (u1 < 0),
-    // limitamos el empuje negativo para que no se lance con toda la fuerza.
-    if (e1_deg < 0.0f && u1 < 0.0f) {
-      if (u1 < -U1_MAX_DOWN) {
-        u1 = -U1_MAX_DOWN;
+    // ===== PID MOTOR 1 =====
+    float u1 = 0.0f;
+    if (fabs(e1_deg) < DEAD_BAND_DEG) {
+      // Cerca de la referencia: no actuamos, reseteamos integral
+      i1_term = 0.0f;
+      u1      = 0.0f;
+    } else {
+      // Integral con anti-windup sencillo
+      i1_term += e1_deg * Ts_s;
+      if (k_i_1 > 1e-6f) {
+        float i1_max = PWM_MAX / k_i_1;
+        i1_term = clampf(i1_term, -i1_max, i1_max);
       }
+
+      float de1 = (e1_deg - e1_prev_deg) / Ts_s;
+      e1_prev_deg = e1_deg;
+
+      u1 = k_p_1 * e1_deg + k_i_1 * i1_term + k_d_1 * de1;
     }
 
-    int dir1;
-    if (u1 >= 0.0f) {
-      dir1  = +1;
-      duty1 = (uint8_t)(u1);
-    } else {
-      dir1  = -1;
-      duty1 = (uint8_t)(-u1);
-    }
+    // Saturación de u1
+    u1 = clampf(u1, -PWM_MAX, PWM_MAX);
+    dbg_u1 = u1;
 
-    // Pequeño umbral para evitar ruidito de PWM muy bajo
-    if (duty1 < 5) duty1 = 0;
-
-    // aplicar inversión lógica si hace falta
+    // Dirección y PWM motor 1
+    int dir1 = (u1 >= 0.0f) ? 1 : -1;
     dir1 *= M1_DIR_INV;
-
     dbg_dir1 = dir1;
-    dbg_u1   = u1;
 
-    // ====================== MOTOR 2: PD clásico con deadband ======================
-    float u2 = k_p_2 * e2_deg + k_i_2 * e2_int_deg + k_d_2 * de2_deg;
-
-    if (fabs(e2_deg) < DEAD_BAND_DEG) {
-      u2 = 0.0f;
-    }
-
-    u2 = clampf(u2, -U2_MAX, U2_MAX);
-
-    int dir2;
-    if (u2 >= 0.0f) {
-      dir2  = +1;
-      duty2 = (uint8_t)(u2);
+    float mag1 = fabs(u1);
+    if (mag1 < 1.0f) {
+      duty1 = 0;
     } else {
-      dir2  = -1;
-      duty2 = (uint8_t)(-u2);
+      if (mag1 < MIN_DUTY_1) mag1 = MIN_DUTY_1;       // vencer fricción
+      if (mag1 > PWM_MAX)    mag1 = PWM_MAX;
+      duty1 = (uint8_t)mag1;
     }
 
-    if (duty2 < 5) duty2 = 0;
+    // ===== PID MOTOR 2 =====
+    float u2 = 0.0f;
+    if (fabs(e2_deg) < DEAD_BAND_DEG) {
+      i2_term = 0.0f;
+      u2      = 0.0f;
+    } else {
+      i2_term += e2_deg * Ts_s;
+      if (k_i_2 > 1e-6f) {
+        float i2_max = PWM_MAX / k_i_2;
+        i2_term = clampf(i2_term, -i2_max, i2_max);
+      }
 
+      float de2 = (e2_deg - e2_prev_deg) / Ts_s;
+      e2_prev_deg = e2_deg;
+
+      u2 = k_p_2 * e2_deg + k_i_2 * i2_term + k_d_2 * de2;
+    }
+
+    // Saturación de u2
+    u2 = clampf(u2, -PWM_MAX, PWM_MAX);
+    dbg_u2 = u2;
+
+    int dir2 = (u2 >= 0.0f) ? 1 : -1;
     dbg_dir2 = dir2;
-    dbg_u2   = u2;
+
+    float mag2 = fabs(u2);
+    if (mag2 < 1.0f) {
+      duty2 = 0;
+    } else {
+      // Escalamos al rango [MIN_DUTY_2, MAX_DUTY_2]
+      if (mag2 > PWM_MAX) mag2 = PWM_MAX;
+      float norm2 = mag2 / PWM_MAX;  // 0..1
+      float d2f = MIN_DUTY_2 + norm2 * (MAX_DUTY_2 - MIN_DUTY_2);
+      if (d2f > MAX_DUTY_2) d2f = MAX_DUTY_2;
+      duty2 = (uint8_t)d2f;
+    }
 
     // --------- Dirección motor 1 + actualizar signo para el encoder ---------
     if (dir1 >= 0) {
@@ -468,29 +419,35 @@ void controlStep() {
       interrupts();
     }
 
-    // Si solo estás probando M1, puedes dejar M2 apagado:
     analogWrite(OutputPWM_GPIO_1, duty1);
-    analogWrite(OutputPWM_GPIO_2, 0);  // o duty2 cuando quieras usarlo
+    analogWrite(OutputPWM_GPIO_2, duty2);
   }
 
   // ----- Telemetría -----
   if (now - lastPrint >= PRINT_MS) {
     lastPrint = now;
-    // Telemetría compacta para el simulador:
-    // Y,<millis>,<q1>,<q2>,<q1_ref>,<q2_ref>,<u1>,<u2>
+    Serial.print("theta1: ");    Serial.print(angulo_1_rad, 6);
+    Serial.print("  theta2: ");  Serial.print(angulo_2_rad, 6);
+
     float ref1_int_rad = Ref1_int_deg * PI / 180.0f;
     float ref2_int_rad = Ref2_int_deg * PI / 180.0f;
-    float u1_norm = clampf(dbg_u1 / U1_MAX, -1.0f, 1.0f);
-    float u2_norm = clampf(dbg_u2 / U2_MAX, -1.0f, 1.0f);
 
-    Serial.print('Y'); Serial.print(',');
-    Serial.print(millis()); Serial.print(',');
-    Serial.print(angulo_1_rad, 6); Serial.print(',');
-    Serial.print(angulo_2_rad, 6); Serial.print(',');
-    Serial.print(ref1_int_rad, 6); Serial.print(',');
-    Serial.print(ref2_int_rad, 6); Serial.print(',');
-    Serial.print(u1_norm, 6); Serial.print(',');
-    Serial.println(u2_norm, 6);
+    Serial.print("  ref1: ");    Serial.print(ref1_int_rad, 6);
+    Serial.print("  ref2: ");    Serial.print(ref2_int_rad, 6);
+
+    Serial.print("  e1_deg: ");  Serial.print(dbg_e1_deg, 1);
+    Serial.print("  e2_deg: ");  Serial.print(dbg_e2_deg, 1);
+
+    Serial.print("  u1: ");      Serial.print(dbg_u1, 1);
+    Serial.print("  u2: ");      Serial.print(dbg_u2, 1);
+
+    Serial.print("  dir1: ");    Serial.print(dbg_dir1);
+    Serial.print("  dir2: ");    Serial.print(dbg_dir2);
+
+    Serial.print("  duty1: ");   Serial.print(duty1);
+    Serial.print("  duty2: ");   Serial.print(duty2);
+
+    Serial.print("  stop: ");    Serial.println(stopAll ? 1 : 0);
   }
 
   leerComandosSerial();
@@ -531,15 +488,10 @@ void setup() {
   dirSign_1    = +1;
   dirSign_2    = +1;
   refIntInit   = false;
-  e1_prev_deg  = 0.0f;
-  e2_prev_deg  = 0.0f;
-  e1_int_deg   = 0.0f;
-  e2_int_deg   = 0.0f;
-  ang1_filt_init    = false;
-  angulo_1_filtrado = 0.0f;
+  resetPID();
   interrupts();
 
-  Serial.println(F("Sistema listo (M1 con PI-D, limitación hacia abajo y filtro anti-salto en encoder)."));
+  Serial.println(F("Sistema listo (PID completo + referencia interna suave)."));
   Serial.println(F("Comandos:"));
   Serial.println(F("  Z                -> recalibrar cero"));
   Serial.println(F("  R,th1,th2        -> referencias en radianes"));

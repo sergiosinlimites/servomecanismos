@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gemelo Digital 2R – Web</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <!-- Plotly para gráficas (WebGL acelerado) -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1>Gemelo Digital 2R – Web</h1>
+      <div class="status" id="statusText">Listo</div>
+    </header>
+
+    <section class="layout">
+      <div class="section section-sim">
+        <h2 class="section-title">Sección 1: Simulación</h2>
+        <div class="sim-grid">
+          <div class="display">
+            <canvas id="armCanvas" width="1000" height="1000"></canvas>
+          </div>
+          <div class="sim-controls">
+            <div class="controls">
+          <h2>Parámetros del trébol</h2>
+          <div class="grid">
+            <label>a (lóbulos)</label>
+            <input type="number" id="inp_a" min="1" max="12" step="1" value="4" />
+            <label>b (°)</label>
+            <input type="number" id="inp_bdeg" min="0" max="360" step="1" value="90" />
+            <label>M</label>
+            <input type="number" id="inp_M" min="0" max="0.95" step="0.01" value="0.30" />
+            <label>escala [cm]</label>
+            <input type="number" id="inp_scale" min="1" max="12" step="0.1" value="7.5" />
+          </div>
+
+          <h2>Brazo y movimiento</h2>
+          <div class="grid">
+            <label>d1 [cm]</label>
+            <input type="number" id="inp_d1" min="10" max="35" step="0.1" value="25.0" />
+            <label>d2 [cm]</label>
+            <input type="number" id="inp_d2" min="10" max="35" step="0.1" value="18.0" />
+            <label>vel [cm/s]</label>
+            <input type="number" id="inp_v" min="0.5" max="30" step="0.1" value="6.0" />
+            <label>blend [s]</label>
+            <input type="number" id="inp_blend" min="0" max="3" step="0.1" value="1.0" />
+          </div>
+
+          <h2>Límites y ciclos</h2>
+          <div class="grid">
+            <label>ω_max [rad/s]</label>
+            <input type="number" id="inp_wmax" min="0.5" max="12" step="0.1" value="6.0" />
+            <label>α_max [rad/s²]</label>
+            <input type="number" id="inp_amax" min="5" max="200" step="1" value="50" />
+            <label>cycles</label>
+            <input type="number" id="inp_cycles" min="1" max="10" step="1" value="10" />
+            <label>dwell [s]</label>
+            <input type="number" id="inp_dwell" min="0" max="5" step="0.1" value="1.0" />
+          </div>
+
+          <div class="buttons">
+            <button id="btnPlan">Planificar</button>
+            <button id="btnStart">Start</button>
+            <button id="btnStop" class="warn">Stop</button>
+            <button id="btnReset">Reset</button>
+          </div>
+
+            </div>
+
+            <div class="save-controls">
+          <h2>Exportar</h2>
+          <div class="buttons">
+            <button id="btnSaveConfig">Guardar Config TXT</button>
+            <button id="btnSaveCSV">Guardar Trayectoria CSV</button>
+            <button id="btnSaveTelemetry">Guardar Telemetría CSV</button>
+          </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section section-console">
+        <h2 class="section-title">Sección 2: Consola Serial</h2>
+        <div class="serial-controls">
+          <h2>Configuración Serial</h2>
+          <div class="grid">
+            <label>Baudios</label>
+            <input type="number" id="inp_baud" min="9600" step="1" value="115200" />
+            <label>FPS</label>
+            <input type="number" id="inp_fps" min="10" max="120" step="1" value="60" />
+            <label>Habilitar Serial</label>
+            <input type="checkbox" id="chk_serial" checked />
+          </div>
+          <div class="buttons">
+            <button id="btnConnect">Conectar puerto</button>
+            <button id="btnDisconnect">Desconectar</button>
+          </div>
+        </div>
+        <div class="console">
+          <h3>Consola (TX/RX)</h3>
+        <pre id="serialConsole"></pre>
+        </div>
+      </div>
+
+      <div class="section section-plots">
+        <h2 class="section-title">Sección 3: Gráficas</h2>
+        <div class="plots-grid">
+          <div id="plot_theta" class="plot"></div>
+          <div id="plot_omega" class="plot"></div>
+          <div id="plot_alpha" class="plot"></div>
+          <div id="plot_jerk" class="plot"></div>
+        </div>
+        <div class="analysis-grid">
+          <div id="hist_th1" class="plot small"></div>
+          <div id="hist_th2" class="plot small"></div>
+          <div id="hist2d" class="plot small"></div>
+          <div id="dem_omega" class="plot small"></div>
+          <div id="dem_alpha" class="plot small"></div>
+          <div id="dem_effort" class="plot small"></div>
+        </div>
+        <div id="stats" class="stats-table"></div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+<!-- Requisitos: navegador Chromium con Web Serial habilitado. Ejecuta: python web/serve.py y abre http://localhost:8000/web/ -->
+</html>
+
+
