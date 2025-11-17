@@ -6,15 +6,17 @@ const state = {
   canvas: new CanvasSpec(20 * CM, 20 * CM),
   armParams: new ArmParams(25.0 * CM, 18.0 * CM, [-5.0 * CM, -5.0 * CM]),
   trefoil: new TrefoilSpec(4, Math.PI / 2, 0.3, 7.5 * CM, [10.0 * CM, 10.0 * CM]),
-  motion: new MotionSpec(6.0, 60, 10, true, 1.0, 1.0, 6.0, 50.0),
+  motion: new MotionSpec(1.0, 60, 10, true, 1.0, 1.0, 6.0, 50.0),
   planned: null, // { t, refXY, thetas, vEff, idx0, startIdxTraj, Ncycle }
   view: { minX: -10, maxX: 25, minY: -10, maxY: 25 }, // viewport mundo→canvas
+  txPeriodMs: 200,
   serialEnabled: true,
   serial: new SerialManager(),
   connected: false,
   sending: false,
   startTimePerf: null,
   frameIndex: 0,
+  lastTxTime: 0,
   telemetry: [], // objetos {pc_time_s, arduino_ms, q1, q2, q1_ref, q2_ref, u1, u2}
 };
 
@@ -40,9 +42,22 @@ const dom = {
   // serial
   baud: document.getElementById('inp_baud'),
   fps: document.getElementById('inp_fps'),
+  txMs: document.getElementById('inp_tx_ms'),
   chkSerial: document.getElementById('chk_serial'),
   btnConnect: document.getElementById('btnConnect'),
   btnDisconnect: document.getElementById('btnDisconnect'),
+  btnZero: document.getElementById('btnZero'),
+  btnStopS: document.getElementById('btnStop'),
+  // PID inputs/buttons
+  kp1: document.getElementById('inp_kp1'),
+  kp2: document.getElementById('inp_kp2'),
+  ki1: document.getElementById('inp_ki1'),
+  ki2: document.getElementById('inp_ki2'),
+  kd1: document.getElementById('inp_kd1'),
+  kd2: document.getElementById('inp_kd2'),
+  btnSendP: document.getElementById('btnSendP'),
+  btnSendI: document.getElementById('btnSendI'),
+  btnSendD: document.getElementById('btnSendD'),
   console: document.getElementById('serialConsole'),
   // acciones
   btnPlan: document.getElementById('btnPlan'),
@@ -107,6 +122,7 @@ function getInputsIntoState() {
   state.motion.dwellS = parseFloat(dom.dwell.value);
 
   state.motion.fps = parseInt(dom.fps.value, 10);
+  state.txPeriodMs = parseInt(dom.txMs.value, 10) || 200;
   state.serialEnabled = !!dom.chkSerial.checked;
 }
 
@@ -117,7 +133,7 @@ function resetInputsToDefault() {
   dom.scale.value = '7.5';
   dom.d1.value = '25.0';
   dom.d2.value = '18.0';
-  dom.v.value = '6.0';
+  dom.v.value = '1.0';
   dom.blend.value = '1.0';
   dom.wmax.value = '6.0';
   dom.amax.value = '50';
@@ -266,7 +282,12 @@ function renderScene(theta1, theta2) {
   // Opcional: dibujar brazo "real" (planta) si hay telemetría reciente
   if (state.telemetry.length > 0) {
     const last = state.telemetry[state.telemetry.length - 1];
-    const [[rx1, ry1], [rx2, ry2]] = arm.fkine(last.q1, last.q2);
+    // Convertir convención real→sim:
+    // q1_arduino: 0 rad hacia abajo -> sim necesita +π/2 para ser “desde horizontal”
+    // q2_arduino: (aprox absoluta) -> convertir a relativo respecto al primer eslabón
+    let q1_sim = (isFinite(last.q1) ? last.q1 : 0.0) - Math.PI / 2;
+    let q2_rel = (isFinite(last.q2) ? last.q2 : 0.0) - (isFinite(last.q1) ? last.q1 : 0.0);
+    const [[rx1, ry1], [rx2, ry2]] = arm.fkine(q1_sim, q2_rel);
     drawArmSegmentsColor([[state.armParams.base[0], state.armParams.base[1]], [rx1, ry1], [rx2, ry2]], '#ff8b4b');
   }
 }
@@ -345,6 +366,7 @@ function start() {
   state.sending = true;
   state.startTimePerf = performance.now() / 1000.0;
   state.frameIndex = 0;
+  state.lastTxTime = 0;
   state.telemetry = [];
   // Enviar Z
   if (state.serialEnabled && state.connected) {
@@ -372,8 +394,14 @@ function loop() {
       tipTrace.xs.push(x2);
       tipTrace.ys.push(y2);
     }
-    if (state.serialEnabled && state.connected) {
+  }
+  // Envío de referencia a periodo configurado
+  if (state.serialEnabled && state.connected) {
+    if ((tNow - state.lastTxTime) >= (state.txPeriodMs / 1000.0)) {
+      const th1 = planned.thetas[iTarget * 2];
+      const th2 = planned.thetas[iTarget * 2 + 1];
       state.serial.sendR(th1, th2, (tNow - state.startTimePerf)).catch(() => {});
+      state.lastTxTime = tNow;
     }
   }
   // Render del frame objetivo
@@ -739,6 +767,33 @@ dom.btnDisconnect.addEventListener('click', async () => {
   await state.serial.disconnect().catch(() => {});
   state.connected = false;
   setStatus('Serial desconectado.');
+});
+dom.btnZero.addEventListener('click', async () => {
+  if (!state.connected) return;
+  await state.serial.sendZ().catch(() => {});
+});
+dom.btnStopS.addEventListener('click', async () => {
+  // Primero detén la simulación (para que no siga enviando R),
+  // luego manda 'S' al Arduino.
+  stop();
+  if (state.connected) {
+    await state.serial.sendS().catch(() => {});
+  }
+});
+dom.btnSendP.addEventListener('click', async () => {
+  if (!state.connected) return;
+  const kp1 = parseFloat(dom.kp1.value), kp2 = parseFloat(dom.kp2.value);
+  if (isFinite(kp1) && isFinite(kp2)) await state.serial.sendP(kp1, kp2).catch(() => {});
+});
+dom.btnSendI.addEventListener('click', async () => {
+  if (!state.connected) return;
+  const ki1 = parseFloat(dom.ki1.value), ki2 = parseFloat(dom.ki2.value);
+  if (isFinite(ki1) && isFinite(ki2)) await state.serial.sendI(ki1, ki2).catch(() => {});
+});
+dom.btnSendD.addEventListener('click', async () => {
+  if (!state.connected) return;
+  const kd1 = parseFloat(dom.kd1.value), kd2 = parseFloat(dom.kd2.value);
+  if (isFinite(kd1) && isFinite(kd2)) await state.serial.sendD(kd1, kd2).catch(() => {});
 });
 
 dom.btnSaveConfig.addEventListener('click', onSaveConfig);

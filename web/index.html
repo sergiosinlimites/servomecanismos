@@ -43,7 +43,7 @@
             <label>d2 [cm]</label>
             <input type="number" id="inp_d2" min="10" max="35" step="0.1" value="18.0" />
             <label>vel [cm/s]</label>
-            <input type="number" id="inp_v" min="0.5" max="30" step="0.1" value="6.0" />
+            <input type="number" id="inp_v" min="0.5" max="30" step="0.1" value="1.0" />
             <label>blend [s]</label>
             <input type="number" id="inp_blend" min="0" max="3" step="0.1" value="1.0" />
           </div>
@@ -90,12 +90,36 @@
             <input type="number" id="inp_baud" min="9600" step="1" value="115200" />
             <label>FPS</label>
             <input type="number" id="inp_fps" min="10" max="120" step="1" value="60" />
+            <label>Periodo TX [ms]</label>
+            <input type="number" id="inp_tx_ms" min="20" step="10" value="200" />
             <label>Habilitar Serial</label>
             <input type="checkbox" id="chk_serial" checked />
           </div>
           <div class="buttons">
             <button id="btnConnect">Conectar puerto</button>
             <button id="btnDisconnect">Desconectar</button>
+            <button id="btnZero">Zero (Z)</button>
+            <button id="btnStop" class="warn">Stop (S)</button>
+          </div>
+          <h2>Ganancias (P/I/D)</h2>
+          <div class="grid">
+            <label>Kp1</label>
+            <input type="number" id="inp_kp1" step="0.01" value="1.0" />
+            <label>Kp2</label>
+            <input type="number" id="inp_kp2" step="0.01" value="1.0" />
+            <label>Ki1</label>
+            <input type="number" id="inp_ki1" step="0.01" value="0.3" />
+            <label>Ki2</label>
+            <input type="number" id="inp_ki2" step="0.01" value="0.0" />
+            <label>Kd1</label>
+            <input type="number" id="inp_kd1" step="0.01" value="0.6" />
+            <label>Kd2</label>
+            <input type="number" id="inp_kd2" step="0.01" value="0.05" />
+          </div>
+          <div class="buttons">
+            <button id="btnSendP">Enviar Kp (P,Kp1,Kp2)</button>
+            <button id="btnSendI">Enviar Ki (I,Ki1,Ki2)</button>
+            <button id="btnSendD">Enviar Kd (D,Kd1,Kd2)</button>
           </div>
         </div>
         <div class="console">

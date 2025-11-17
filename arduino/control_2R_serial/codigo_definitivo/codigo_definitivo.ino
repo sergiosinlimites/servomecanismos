@@ -174,11 +174,7 @@ void leerComandosSerial() {
         if (d == '\n' || d == '\r') break;
       }
 
-      Serial.print(F("Nuevas refs -> Ref_1="));
-      Serial.print(Ref_1, 4);
-      Serial.print(F(" rad, Ref_2="));
-      Serial.print(Ref_2, 4);
-      Serial.println(F(" rad"));
+      // (silenciar prints de cambio de referencias para no saturar el puerto)
     }
     else if (c == 'P') {
       float p1 = Serial.parseFloat();
@@ -318,37 +314,11 @@ void controlStep() {
     analogWrite(OutputPWM_GPIO_1, 0);
     analogWrite(OutputPWM_GPIO_2, 0);
   } else {
-    // ---------- Generador de referencia suave (en grados) ----------
+    // ---------- Usar referencias directamente (sin escalonado) ----------
     float Ref1_cmd_deg = Ref_1 * 180.0f / PI;
     float Ref2_cmd_deg = Ref_2 * 180.0f / PI;
-
-    // Rampa no lineal para motor 1
-    float diffRef1 = Ref1_cmd_deg - Ref1_int_deg;
-    float dist1    = fabs(diffRef1);
-    float step1;
-    if (dist1 > 40.0f)      step1 = STEP_FAST;    // lejos
-    else if (dist1 > 15.0f) step1 = STEP_MEDIUM;  // medio
-    else                    step1 = STEP_SLOW;    // cerca
-
-    if (fabs(diffRef1) <= step1) {
-      Ref1_int_deg = Ref1_cmd_deg;
-    } else {
-      Ref1_int_deg += (diffRef1 > 0.0f ? step1 : -step1);
-    }
-
-    // Rampa no lineal también para motor 2
-    float diffRef2 = Ref2_cmd_deg - Ref2_int_deg;
-    float dist2    = fabs(diffRef2);
-    float step2;
-    if (dist2 > 40.0f)      step2 = STEP_FAST;
-    else if (dist2 > 15.0f) step2 = STEP_MEDIUM;
-    else                    step2 = STEP_SLOW;
-
-    if (fabs(diffRef2) <= step2) {
-      Ref2_int_deg = Ref2_cmd_deg;
-    } else {
-      Ref2_int_deg += (diffRef2 > 0.0f ? step2 : -step2);
-    }
+    Ref1_int_deg = Ref1_cmd_deg;
+    Ref2_int_deg = Ref2_cmd_deg;
 
     // ----- Control en grados usando referencia interna -----
     float e1_deg = Ref1_int_deg - angulo_1;

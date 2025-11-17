@@ -112,7 +112,7 @@ export class TrefoilGenerator {
 }
 
 export class MotionSpec {
-  constructor(speedCmS = 6.0, fps = 60, cycles = 10, elbowUp = true, dwellS = 1.0, blendS = 1.0, wMax = 6.0, aMax = 50.0) {
+  constructor(speedCmS = 1.0, fps = 60, cycles = 10, elbowUp = true, dwellS = 1.0, blendS = 1.0, wMax = 6.0, aMax = 50.0) {
     this.speed = speedCmS;
     this.fps = fps;
     this.cycles = cycles;
@@ -291,7 +291,11 @@ export class TrajectoryPlanner {
     // T_blend mínimo por aceleración (aprox conservadora)
     const T_acc = Math.sqrt((10.0 * dth) / Math.max(EPS, this.motion.aMax));
     const T_user = Math.max(0, this.motion.blendS);
-    const T_blend = Math.max(T_user, T_vel, T_acc);
+    // Limitar también por velocidad lineal deseada (distancia punta / v_eff)
+    const [[, ], [xpk, ypk]] = this.arm.fkine(thPark[0], thPark[1]);
+    const distXY = Math.hypot(x0 - xpk, y0 - ypk);
+    const T_speed = distXY / Math.max(EPS, vEff);
+    const T_blend = Math.max(T_user, T_vel, T_acc, T_speed);
     const Nblend = Math.max(1, Math.floor(T_blend * fps));
 
     const Ntotal = N0 + Nblend + cycles * Ncycle;
