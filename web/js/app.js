@@ -252,6 +252,16 @@ function renderScene(theta1, theta2) {
   const arm = new Arm2R(state.armParams);
   const [[x1, y1], [x2, y2]] = arm.fkine(theta1, theta2);
   drawArmSegments([[state.armParams.base[0], state.armParams.base[1]], [x1, y1], [x2, y2]]);
+  // Etiquetas de ángulos (θ1 y θ2). Convención visual: 0° hacia abajo
+  const deg1 = (theta1 + Math.PI / 2) * 180 / Math.PI;
+  const deg2 = (theta2) * 180 / Math.PI; // relativo al primer eslabón
+  // Texto cerca de base y codo
+  ctx.fillStyle = '#cdeaff';
+  ctx.font = '12px monospace';
+  const [bx, by] = worldToCanvas(state.armParams.base[0], state.armParams.base[1]);
+  const [ex, ey] = worldToCanvas(x1, y1);
+  ctx.fillText(`θ1=${deg1.toFixed(1)}°`, bx + 8, by - 6);
+  ctx.fillText(`θ2=${deg2.toFixed(1)}°`, ex + 8, ey - 6);
 
   // Opcional: dibujar brazo "real" (planta) si hay telemetría reciente
   if (state.telemetry.length > 0) {

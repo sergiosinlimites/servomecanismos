@@ -303,14 +303,42 @@ export class TrajectoryPlanner {
     // 5) primera vuelta empezando en s0
     const tau = new Float64Array(Ncycle);
     for (let i = 0; i < Ncycle; i++) tau[i] = (i / fps) * vEff;
-    const sQuery = new Float64Array(Ncycle);
-    for (let i = 0; i < Ncycle; i++) sQuery[i] = (s0 + tau[i]) % L;
-    const xcyc = this._interp1(s, xs, sQuery);
-    const ycyc = this._interp1(s, ys, sQuery);
+    const sQueryF = new Float64Array(Ncycle);
+    for (let i = 0; i < Ncycle; i++) sQueryF[i] = (s0 + tau[i]) % L;
+    const xcycF = this._interp1(s, xs, sQueryF);
+    const ycycF = this._interp1(s, ys, sQueryF);
+
+    // Alternativa: sentido inverso (para evitar cambio brusco de dirección tras el blend)
+    const sQueryR = new Float64Array(Ncycle);
+    for (let i = 0; i < Ncycle; i++) {
+      let sq = (s0 - tau[i]) % L; if (sq < 0) sq += L;
+      sQueryR[i] = sq;
+    }
+    const xcycR = this._interp1(s, xs, sQueryR);
+    const ycycR = this._interp1(s, ys, sQueryR);
 
     // 6) IK del primer punto y blend quíntico desde parqueo (vertical hacia abajo)
     const thFirst = thFirstTmp;
     const thBlend = this._quinticBlend(thPark, thFirst, Nblend);
+
+    // 6.1) Elegir dirección del ciclo que mejor alinea con el vector de aproximación del blend
+    let approach = [1, 0];
+    if (Nblend >= 2) {
+      const [[, ], [px2, py2]] = this.arm.fkine(thBlend[Math.max(0, Nblend - 2)][0], thBlend[Math.max(0, Nblend - 2)][1]);
+      const [[, ], [lx2, ly2]] = this.arm.fkine(thBlend[Nblend - 1][0], thBlend[Nblend - 1][1]);
+      approach = [lx2 - px2, ly2 - py2];
+    } else {
+      // fallback: vector desde parqueo hacia primer punto
+      const [[, ], [xpk, ypk]] = this.arm.fkine(thPark[0], thPark[1]);
+      approach = [x0 - xpk, y0 - ypk];
+    }
+    const vF = [xcycF[1] - xcycF[0], ycycF[1] - ycycF[0]];
+    const vR = [xcycR[1] - xcycR[0], ycycR[1] - ycycR[0]];
+    const dotF = approach[0] * vF[0] + approach[1] * vF[1];
+    const dotR = approach[0] * vR[0] + approach[1] * vR[1];
+    const useReverse = dotR > dotF;
+    const xcyc = useReverse ? xcycR : xcycF;
+    const ycyc = useReverse ? ycycR : ycycF;
 
     // 7) componer series
     const refXY = new Float64Array(Ntotal * 2);
