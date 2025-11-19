@@ -131,18 +131,78 @@
       <div class="section section-plots">
         <h2 class="section-title">Sección 3: Gráficas</h2>
         <div class="plots-grid">
-          <div id="plot_theta" class="plot"></div>
-          <div id="plot_omega" class="plot"></div>
-          <div id="plot_alpha" class="plot"></div>
-          <div id="plot_jerk" class="plot"></div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Ángulos articulares (θ)</h3>
+              <p class="plot-desc">Perfiles de referencia de θ₁ y θ₂ en grados.</p>
+            </div>
+            <div id="plot_theta" class="plot"></div>
+          </div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Velocidades articulares (ω)</h3>
+              <p class="plot-desc">Velocidades angulares ω₁ y ω₂ de las articulaciones.</p>
+            </div>
+            <div id="plot_omega" class="plot"></div>
+          </div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Aceleraciones articulares (α)</h3>
+              <p class="plot-desc">Aceleraciones angulares α₁ y α₂ derivadas numéricamente.</p>
+            </div>
+            <div id="plot_alpha" class="plot"></div>
+          </div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Jerk articular</h3>
+              <p class="plot-desc">Tercera derivada (suavidad) para θ₁ y θ₂.</p>
+            </div>
+            <div id="plot_jerk" class="plot"></div>
+          </div>
         </div>
         <div class="analysis-grid">
-          <div id="hist_th1" class="plot small"></div>
-          <div id="hist_th2" class="plot small"></div>
-          <div id="hist2d" class="plot small"></div>
-          <div id="dem_omega" class="plot small"></div>
-          <div id="dem_alpha" class="plot small"></div>
-          <div id="dem_effort" class="plot small"></div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Histograma θ₁</h3>
+              <p class="plot-desc">Distribución de ángulos de la articulación 1.</p>
+            </div>
+            <div id="hist_th1" class="plot small"></div>
+          </div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Histograma θ₂</h3>
+              <p class="plot-desc">Distribución de ángulos de la articulación 2.</p>
+            </div>
+            <div id="hist_th2" class="plot small"></div>
+          </div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Densidad 2D θ₁ vs θ₂</h3>
+              <p class="plot-desc">Mapa de calor de pares angulares entre articulaciones.</p>
+            </div>
+            <div id="hist2d" class="plot small"></div>
+          </div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Demanda de velocidad |ω|</h3>
+              <p class="plot-desc">Norma de velocidades angulares a lo largo de la trayectoria.</p>
+            </div>
+            <div id="dem_omega" class="plot small"></div>
+          </div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Demanda de aceleración |α|</h3>
+              <p class="plot-desc">Norma de aceleraciones angulares sobre el espacio de trabajo.</p>
+            </div>
+            <div id="dem_alpha" class="plot small"></div>
+          </div>
+          <div class="plot-card">
+            <div class="plot-header">
+              <h3>Mapa de esfuerzo</h3>
+              <p class="plot-desc">Métrica combinada de |ω| y |α| como indicador de esfuerzo.</p>
+            </div>
+            <div id="dem_effort" class="plot small"></div>
+          </div>
         </div>
         <div id="stats" class="stats-table"></div>
       </div>

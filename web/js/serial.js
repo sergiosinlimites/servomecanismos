@@ -48,7 +48,6 @@ export class SerialManager {
     if (this.consoleCallback) this.consoleCallback(`TX ${text.trim()}`);
   }
 
-  async sendZ() { await this.writeLine('Z'); }
   async sendS() { await this.writeLine('S'); }
 
   async sendR(theta1, theta2, tpcSeconds) {

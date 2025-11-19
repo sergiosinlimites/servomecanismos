@@ -1,0 +1,927 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{geometry}
+\geometry{margin=2cm}
+
+% Title and author
+\title{Proyecto Académico: Manipulador 2R con Seguimiento de Trayectoria tipo Trébol}
+\author{Equipo de Servomanitos}
+
+\begin{document}
+
+\begin{titlepage}
+\begin{center}
+\maketitle
+\vspace*{1cm}
+
+\textbf{Presentado por:}\\[1cm]
+
+Juan Manuel Beltran Botello\\
+Sergio Andres Bolaños Penagos\\
+Jorge Nicolas Garzon Acevedo\\
+David Santiago Pirateque Suárez\\
+Oscar Jhondairo Siabato León\\
+Jonatan Javier Valero Comayan\\[2cm]
+
+\textbf{Profesor:}\\[0.5cm]
+Victor Hugo Grisales Palacio\\[3cm]
+
+\includegraphics[width=0.25\textwidth]{escudo_unal.png}\\[1cm]
+Universidad Nacional de Colombia\\
+Facultad de Ingeniería\\
+Departamento de Ingeniería Mecánica y Mecatrónica\\
+2025
+
+\end{center}
+\end{titlepage}
+
+
+
+\section*{Introducción}
+
+Se plantea el desarrollo de un manipulador planar de dos grados de libertad (2R) capaz de seguir automáticamente una trayectoria de prueba con forma de trébol estilizado.  El documento del proyecto define los requerimientos básicos: el mecanismo debe estar conformado por una base fija y dos eslabones móviles, ambos con articulaciones rotacionales, y la trayectoria deseada está circunscrita en un cuadrado de \SI{224}{\milli\metre} de lado\,\!\cite{proyecto}.  La velocidad de seguimiento se considera constante y comprende valores entre \SI{1}{\centi\metre\per\second} y \SI{10}{\centi\metre\per\second}, y se admite escalar la figura hasta un 20\% y rotarla hasta \SI{45}{\degree}\,\!\cite{proyecto}.  Debido a que la trayectoria está cerca de los límites del área de trabajo, el diseño debe incluir una fase de acercamiento desde una postura recogida antes de comenzar el dibujo.\\
+
+
+El presente informe técnico presenta el análisis, diseño e implementación de nuestro manipulador 2R. Se documentan los modelos cinemáticos y dinámicos, la elección de parámetros geométricos, la selección de motores, sensores y electrónica de potencia, la trayectoria de referencia y el diseño del sistema de control.  El sistema se construyó utilizando componentes disponibles en el laboratorio; en consecuencia, la selección de actuadores se orientó a adaptar el diseño mecánico a los motores y sensores existentes más que a una optimización ideal.
+
+% ------------------ Parte / secciones ------------------
+\part{Producto}
+
+\section{Análisis y Diseño de Ingeniería}
+
+\subsection{Requisitos y restricciones de diseño}
+
+\begin{itemize}
+  \item Una base fija y dos eslabones móviles. El movimiento debe ser en un plano vertical.
+  \item Dos articulaciones motorizadas, ambas de tipo Rotacional (R).
+  \item La trayectoria de prueba se mide en el extremo distal del segundo eslabón. 
+        La trayectoria tiene forma de ``Trébol \underline{estilizado} de \underline{n-hojas}''. 
+        A título ilustrativo, \(n = 3\) en la figura, con \(L\) mínimo = 20 cm.
+  \item La trayectoria deseada y la recorrida deben graficarse desde un computador, 
+        preferiblemente en tiempo real y debe permitirse ajuste de escala hasta un 
+        factor de 1.2 y rotación de \(\pm 45^\circ\).
+  \item Al inicio del movimiento el mecanismo (recogido) debe situarse como máximo 
+        a la mitad de la altura del ``Trébol estilizado'' y a la izquierda del cuadrado 
+        en el que éste se circunscribe.
+  \item La velocidad con que se recorre la trayectoria se supone constante. 
+        Se considera entre 1 y 10 cm/s.
+  \item Después de una fase de aproximación, el servomecanismo debe seguir 
+        automáticamente los perfiles de movimiento recorriendo el trébol estilizado 
+        por varios ciclos (hasta 10) en forma rápida y precisa.
+\end{itemize}
+
+
+\subsection{Parámetros geométricos y diseño de la trayectoria}
+
+\subsubsection{Dimensiones del manipulador}
+
+El manipulador consta de dos eslabones de longitudes $L_1$ y $L_2$, estas distancias se definen desde los centros del las juntas o ejes que articulan el eslabón y tiene las dimensiones:
+
+\begin{align*}
+L_1 &= \SI{235}{\milli\metre},\\
+L_2 &= \SI{165}{\milli\metre}.
+\end{align*}
+
+Para efectos de simplificación en la simulación, el centro del trebol será el punto de origen, y la base del robot se sitúa en el punto $(x_\text{base},y_\text{base}) = (-170,-170)\;\text{mm}$, con el origen de la escena en el centro de la figura.  La suma de longitudes define el radio máximo alcanzable: $R_\text{max}=L_1+L_2=\SI{400}{\milli\metre}$, de modo que el área de trabajo cubre por completo el cuadrado de \SI{224}{\milli\metre} de lado circunscrito a la trayectoria\,[\!\cite{proyecto}].  El código inicia la secuencia en el punto $(-153,-565)$ y desplaza el efector hasta el punto $(82,0)$ para comenzar el dibujo del trébol.  El primer eslabón está limitado mecánicamente a un rango de $(-90^{\circ},110^{\circ})$, es decir aproximadamente \SI{200}{\degree}, mientras que el segundo eslabón puede girar libremente.
+
+\subsubsection{Espacio de trabajo y punto \textit{home}}
+
+El espacio de trabajo de un manipulador 2R es un anillo entre los radios $r_{\min}=|L_1-L_2|$ y $r_{\max}=L_1+L_2$.  Con las longitudes elegidas se obtiene $r_{\min}=|235-165|=\SI{70}{\milli\metre}$ y $r_{\max}=\SI{400}{\milli\metre}$.  La trayectoria estilizada de trébol diseñado a partir de puntos de control como se expondrá más adelante, se circunscribe en un disco de radio \SI{112}{\milli\metre}; por lo tanto, queda completamente contenida en el área de trabajo y el mecanismo dispone de márgenes para escalado y rotación.  El punto \emph{home} utilizado en la simulación corresponde a la configuración en la que ambos eslabones se hallan verticales hacia abajo ($x=-153\,\text{mm}$, $y=-565\,\text{mm}$), desde donde se inicia la fase de giro hasta el inicio del trébol.
+
+
+\subsection{Parametrización de la trayectoria tipo trébol en representación polar}
+
+Antes de adoptar una descripción basada en puntos de control, se estudió la posibilidad de definir la trayectoria del efector mediante una ecuación explícita en coordenadas polares. En este sistema una curva plana se describe como
+\[
+r = f(\theta),
+\]
+donde $r$ es la distancia al origen y $\theta$ el ángulo polar. La conversión a coordenadas cartesianas se realiza con la transformación clásica
+\begin{equation}
+x(\theta) = r(\theta)\cos\theta,\qquad
+y(\theta) = r(\theta)\sin\theta.
+\label{eq:polar-cartesiano}
+\end{equation}
+
+Como punto de partida se consideró la función base
+\begin{equation}
+r(\theta) = 1 + \sin\theta,
+\label{eq:cardioide-base}
+\end{equation}
+que genera una curva tipo cardioide. A partir de (\ref{eq:cardioide-base}) se realizó un estudio paramétrico modificando sistemáticamente sus términos para observar cómo cambiaba la forma del dibujo. En particular, se analizó la familia
+\begin{equation}
+r(\theta) = 1 + M \sin(a\theta + b),
+\label{eq:r-general}
+\end{equation}
+donde cada parámetro tiene un efecto geométrico bien definido:
+
+\begin{itemize}
+  \item $a$ controla el \emph{número de lóbulos} de la figura. Para $a=1$ se obtiene una cardioide, mientras que para $a=4$ la curva presenta cuatro lóbulos, recordando un trébol de cuatro hojas.
+  \item $M$ regula la \emph{magnitud de los lóbulos}; valores pequeños de $M$ producen una figura casi circular, mientras que valores más grandes hacen que los lóbulos sean más pronunciados.
+  \item $b$ actúa como un \emph{desfase angular}, desplazando la posición de los lóbulos sobre el plano sin alterar su forma.
+\end{itemize}
+
+Para poder escalar libremente la figura se introdujo además un radio base $R$ y un factor de escala global $E$, de modo que la parametrización final en coordenadas cartesianas quedó
+\begin{align}
+x(\theta) &= E R\bigl[1 + M\sin(a\theta + b)\bigr]\cos\theta, \label{eq:x-polar}\\
+y(\theta) &= E R\bigl[1 + M\sin(a\theta + b)\bigr]\sin\theta. \label{eq:y-polar}
+\end{align}
+
+El ajuste de los parámetros $(M,a,b,E)$ se realizó de forma iterativa empleando una herramienta de geometría dinámica. Para cada conjunto de valores se graficaba la curva resultante y se verificaban:
+(i) el número de lóbulos (controlado por $a$),
+(ii) el grado de ``redondez'' o aplanamiento de los pétalos (controlado por $M$),
+(iii) la orientación del trébol (definida por $b$) y
+(iv) el tamaño global (determinado por $E R$).
+Este procedimiento permitió identificar rangos adecuados para los parámetros (por ejemplo, $a=4$ para obtener cuatro lóbulos y $M$ en torno a $0.1$–$0.4$ para evitar auto-intersecciones) y generar curvas suaves como la mostrada en la figura~\ref{fig:trebol-polar}.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.5\textwidth]{Trayectoria_Polar.png}
+  \caption{Ejemplo de trayectoria de trébol estilizado obtenida mediante una parametrización polar de la forma (\ref{eq:x-polar})–(\ref{eq:y-polar}) con $a=4$. La curva es suave y cerrada, pero su forma depende globalmente de los parámetros, lo que limita el control local sobre la geometría.}
+  \label{fig:trebol-polar}
+\end{figure}
+
+\paragraph{Limitaciones de la representación polar.}
+Aunque la formulación polar (\ref{eq:x-polar})–(\ref{eq:y-polar}) genera curvas suaves y relativamente sencillas de programar, presenta varias limitaciones importantes para el problema de este proyecto:
+
+\begin{itemize}
+  \item Cambios pequeños en los parámetros $(M,a,b,E)$ modifican simultáneamente \emph{toda} la figura, de modo que ajustar la curva para que coincida con un diseño específico (por ejemplo, el trébol definido en CAD) se vuelve un proceso de ensayo–error poco sistemático.
+  \item La posición exacta de puntos críticos (máximos, mínimos, zonas de curvatura suave o vértices) está acoplada a la forma global de la curva. No es posible fijar de manera independiente la ubicación de ciertos segmentos rectos o transiciones suaves que son deseables para un trazado estético.
+  \item La parametrización polar no incorpora de forma directa las restricciones geométricas del área de trabajo del robot ni las dimensiones discretas utilizadas en el modelo CAD (cotas en milímetros, alineaciones con ejes de referencia, etc.).
+\end{itemize}
+
+En la práctica, aun después de ajustar los parámetros se obtenían tréboles ``razonables'', pero no coincidían con la silueta estilizada deseada ni con las cotas del diseño mecánico. Por ello, en la siguiente subsección se adopta una estrategia alternativa basada en \emph{puntos de control} e interpolación mediante \emph{splines} cúbicas, que permite controlar la forma local de la trayectoria y reproducir fielmente el dibujo definido en CAD.
+
+
+
+\subsection{Parametrización de la trayectoria tipo trébol por puntos de control}
+
+La forma del trébol se obtuvo mediante una combinación de datos de CAD y \emph{splines} cúbicas.  En lugar de derivar la curva a partir de una ecuación polar, se definieron puntos de control equiespaciados a lo largo de la mitad de un pétalo y luego se interpolaron con una \emph{spline} cúbica.  Este procedimiento garantiza continuidad de primera y segunda derivada y evita aristas en las transiciones.
+
+Los puntos de control de la mitad del pétalo corresponden a coordenadas cartesianas en milímetros:
+\begin{align*}
+  x &= [82,\;84,\;88,\;100,\;112,\;100,\;88,\;78],\\
+  y &= [0,\;6,\;9,\;15,\;40,\;65,\;71,\;78].
+\end{align*}
+Las ocho parejas $(x_i,y_i)$ se conectan mediante una curva paramétrica suave.  A continuación, esta mitad se refleja con respecto al eje vertical para completar un pétalo entero.  Luego se repite el pétalo mediante rotaciones de \SI{90}{\degree} para generar las cuatro hojas del trébol.  La figura~\ref{fig:petalo} muestra la mitad del pétalo con sus cotas, mientras que la figura~\ref{fig:trebolcompleto} ilustra el trébol completo obtenido por simetría.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.9\textwidth]{Trayectoria_Puntos_Control.png}
+  \caption{Construcción geométrica de la trayectoria tipo trébol. 
+  A la izquierda se muestran los puntos de control de la mitad de un pétalo con sus cotas en milímetros, que se interpolan mediante una spline cúbica. 
+  A la derecha se observa la trayectoria completa obtenida al reflejar dicha mitad y aplicar simetrías respecto a los ejes horizontal y vertical.}
+  \label{fig:petalo_trebol}
+\end{figure}
+
+
+Una vez generados los puntos de la trayectoria, el algoritmo discretiza la curva en varios puntos para asegurar un seguimiento fluido.  Para cada punto se calcula la cinemática inversa; si el brazo no alcanza la configuración deseada o requiere un codo hacia arriba, se ajusta la postura inicial con la fase de giro.  Este método permite parametrizar la trayectoria con independencia de la formulación polar y aprovechar la información de diseño dada por el CAD, con lo cual se tiene una ventaja en la trayectoria que se requiera  aplicar, dado que el efector final llegará a los puntos que se generen a partir de cualquier trayectoria que se diseñe.
+
+\subsection{Cinemática directa e inversa}
+
+El modelo cinemático directo para un manipulador 2R con eslabones de longitud $L_1$ y $L_2$ y ángulos articulares $(\theta_1,\theta_2)$ (medidos desde la horizontal positiva) se expresa por
+\begin{align}
+x(\theta_1,\theta_2) &= x_\text{base} + L_1 \cos \theta_1 + L_2 \cos(\theta_1 + \theta_2),\\
+y(\theta_1,\theta_2) &= y_\text{base} + L_1 \sin \theta_1 + L_2 \sin(\theta_1 + \theta_2).
+\end{align}
+La cinemática inversa se obtiene aplicando la ley de los cosenos al triángulo formado por el origen, el codo y el efector.  Dado un punto $(x,y)$ en el plano, se define $x_\text{local}=x-x_\text{base}$, $y_\text{local}=y-y_\text{base}$ y $d^2=x_\text{local}^2+y_\text{local}^2$.  Si $d$ se encuentra dentro del anillo circular $|L_1-L_2|\le d\le L_1+L_2$, la solución con codo hacia abajo es
+\begin{align}
+\theta_2 &= \arccos \left(\frac{d^2 - L_1^2 - L_2^2}{2 L_1 L_2}\right),\\
+\theta_1 &= \arctan2\bigl(y_\text{local},\,x_\text{local}\bigr)-\arctan2\bigl(L_2\sin\theta_2,\,L_1 + L_2\cos\theta_2\bigr).
+\end{align}
+
+En un escenario ideal se utilizaría un encoder de alta resolución para que la trayectoria seguida por el efector fuera prácticamente continua. Sin embargo, en el prototipo físico se dispone de un encoder óptico con un disco de \SI{180}{} ranuras leído por el sensor ranurado OPB800 de la serie W, de modo que el control del ángulo se realiza en pasos de \SI{2}{\degree} ($360^{\circ}/180$). En la simulación los ángulos articulares calculados se cuantizan a múltiplos de \SI{2}{\degree}, reproduciendo la limitación de resolución del encoder disponible.
+
+Los conceptos de cinemática directa e inversa serán usados para encontrar los ángulos en los que los eslabones deben orientarse para recorrer las trayectorias suavizadas por las funciones que se obtengan a partir de los splines cúbicos entre los puntos de control mencionados anteriormente
+
+\subsubsection{Cálculo detallado de la \emph{spline} cúbica y obtención de los ángulos articulares}
+
+Para utilizar los puntos de control anteriores como una trayectoria continua se construye una \emph{spline} cúbica natural en cada coordenada.  
+Sea el parámetro $t$ definido sobre nodos equiespaciados
+\[
+t_0 = 0,\; t_1 = 1,\; \dots,\; t_7 = 7,
+\]
+de modo que el $i$-ésimo punto de control es $(x_i,y_i)$ asociado al parámetro $t_i$.  
+El paso entre nodos es $h = t_{i+1}-t_i = 1$.
+
+Para cada componente escalar $u(t)$ (es decir, $u=x$ o $u=y$) se define una \emph{spline} cúbica natural formada por polinomios cúbicos por tramos
+\[
+u(t) = S_i(t), \qquad t\in[t_i,t_{i+1}],\; i=0,\dots,6,
+\]
+con la forma estándar
+\[
+S_i(t) = a_i + b_i (t-t_i) + c_i (t-t_i)^2 + d_i (t-t_i)^3 .
+\]
+
+En la formulación clásica de \emph{spline} cúbica natural es más cómodo escribir $S_i(t)$ en función de los valores $u_i=u(t_i)$ y de las segundas derivadas $M_i = u''(t_i)$:
+\[
+S_i(t) =
+\frac{M_i (t_{i+1}-t)^3}{6h}
++\frac{M_{i+1} (t-t_i)^3}{6h}
++\left(u_i-\frac{M_i h^2}{6}\right)\frac{t_{i+1}-t}{h}
++\left(u_{i+1}-\frac{M_{i+1}h^2}{6}\right)\frac{t-t_i}{h}.
+\]
+Las condiciones de \emph{spline} natural imponen $M_0 = M_7 = 0$, y la continuidad de la derivada primera y segunda en los nodos interiores conduce, para $i=1,\dots,6$, al sistema tridiagonal
+\[
+M_{i-1} + 4 M_i + M_{i+1}
+= 6\,(u_{i+1}-2u_i+u_{i-1}),
+\]
+ya que $h=1$.
+
+\paragraph{Ejemplo para la componente $x(t)$.}
+Aplicando las ecuaciones anteriores a los valores
+\[
+x = [82,\;84,\;88,\;100,\;112,\;100,\;88,\;78]
+\]
+se obtiene, al resolver el sistema lineal $8\times 8$, el vector de segundas derivadas aproximado
+\[
+M^{(x)} = 
+[0,\;0.507,\;9.972,\;7.606,\;-40.394,\;9.972,\;0.507,\;0] \;\;\text{(mm)}.
+\]
+
+Para el \textbf{primer tramo} $[t_0,t_1]=[0,1]$ se tiene $u_0=x_0=82$, $u_1=x_1=84$, $M_0=0$, $M_1=0.507$.  
+Sustituyendo en la expresión general, con $h=1$,
+\[
+S_0^{(x)}(t) =
+\frac{M_0 (1-t)^3}{6}
++\frac{M_1 t^3}{6}
++\left(x_0-\frac{M_0}{6}\right)(1-t)
++\left(x_1-\frac{M_1}{6}\right)t,
+\]
+y simplificando, se obtiene el polinomio cúbico
+\[
+S_0^{(x)}(t) \approx
+0.0845\,t^3 + 1.9155\,t + 82,
+\qquad 0 \le t \le 1.
+\]
+Se verifica que $S_0^{(x)}(0) \approx 82$ y $S_0^{(x)}(1) \approx 84$, como exige la interpolación.
+
+Para el \textbf{segundo tramo} $[t_1,t_2]=[1,2]$ se utilizan $x_1=84$, $x_2=88$, $M_1=0.507$, $M_2=9.972$.  
+El polinomio en forma de \emph{spline} es
+\[
+S_1^{(x)}(t) =
+\frac{M_1 (2-t)^3}{6}
++\frac{M_2 (t-1)^3}{6}
++\left(x_1-\frac{M_1}{6}\right)(2-t)
++\left(x_2-\frac{M_2}{6}\right)(t-1),
+\]
+lo que, tras expandir y reagrupar términos, conduce a
+\[
+S_1^{(x)}(t) \approx
+1.5775\,t^3 - 4.4789\,t^2 + 6.3944\,t + 80.507,
+\qquad 1 \le t \le 2,
+\]
+que cumple $S_1^{(x)}(1)\approx 84$ y $S_1^{(x)}(2)\approx 88$.
+
+\paragraph{Ejemplo para la componente $y(t)$.}
+Repitiendo el procedimiento para
+\[
+y = [0,\;6,\;9,\;15,\;40,\;65,\;71,\;78]
+\]
+se obtiene el vector de segundas derivadas
+\[
+M^{(y)} =
+[0,\;-4.081,\;-1.676,\;28.784,\;0.540,\;-30.944,\;9.236,\;0]\;\;\text{(mm)}.
+\]
+
+En el primer tramo $[0,1]$ la \emph{spline} es
+\[
+S_0^{(y)}(t) =
+\frac{M^{(y)}_0 (1-t)^3}{6}
++\frac{M^{(y)}_1 t^3}{6}
++\left(y_0-\frac{M^{(y)}_0}{6}\right)(1-t)
++\left(y_1-\frac{M^{(y)}_1}{6}\right)t,
+\]
+y sustituyendo $y_0=0$, $y_1=6$, $M^{(y)}_0=0$, $M^{(y)}_1=-4.081$ se obtiene
+\[
+S_0^{(y)}(t) \approx
+-0.6802\,t^3 + 6.6802\,t,
+\qquad 0 \le t \le 1.
+\]
+
+Para el segundo tramo $[1,2]$ con $y_1=6$, $y_2=9$, $M^{(y)}_1=-4.081$, $M^{(y)}_2=-1.676$ se llega a
+\[
+S_1^{(y)}(t) \approx
+0.4009\,t^3 - 3.2432\,t^2 + 9.9234\,t - 1.0811,
+\qquad 1 \le t \le 2,
+\]
+que interpola correctamente $y_1$ y $y_2$ en los nodos $t=1$ y $t=2$.
+
+El mismo procedimiento se aplica a los restantes tramos $[t_i,t_{i+1}]$, generando una trayectoria $t\mapsto (x(t),y(t))$ suave en todo el pétalo.  
+En la implementación numérica del proyecto, en lugar de resolver manualmente el sistema se utilizan directamente las funciones de interpolación de \texttt{SciPy}:
+\begin{verbatim}
+cs_x = CubicSpline(t, x_total, bc_type='natural')
+cs_y = CubicSpline(t, y_total, bc_type='natural')
+\end{verbatim}
+que calculan automáticamente los vectores de segundas derivadas y los polinomios por tramos.
+
+\subsubsection{Obtención de los ángulos articulares a partir de la spline}
+
+Cada punto de la trayectoria cartesiana $(x(t),y(t))$ se convierte en una posición deseada del efector con respecto a la base del robot.  
+Si $(x_\text{base},y_\text{base})$ es la posición de la base en el sistema de referencia del dibujo, las coordenadas del efector en el marco del manipulador son
+\[
+x_r(t) = x(t) - x_\text{base}, \qquad
+y_r(t) = y(t) - y_\text{base}.
+\]
+
+Para el manipulador plano 2R con longitudes $L_1$ y $L_2$ se define
+\[
+d^2(t) = x_r(t)^2 + y_r(t)^2.
+\]
+La cinemática inversa estándar proporciona el ángulo del segundo eslabón:
+\[
+\cos q_2(t) = \frac{d^2(t) - L_1^2 - L_2^2}{2 L_1 L_2},
+\qquad
+q_2(t) = \arccos\bigl(\cos q_2(t)\bigr),
+\]
+donde se selecciona la solución de ``codo abajo''.  
+Luego se calculan los términos auxiliares
+\[
+k_1(t) = L_1 + L_2 \cos q_2(t), \qquad
+k_2(t) = L_2 \sin q_2(t),
+\]
+y el ángulo de la primera articulación como
+\[
+q_1(t) = \arctan2\!\bigl(y_r(t),x_r(t)\bigr)
+          - \arctan2\!\bigl(k_2(t),k_1(t)\bigr).
+\]
+
+De este modo, para cada valor del parámetro $t$ se obtienen primero las coordenadas suavizadas del efector mediante la \emph{spline} cúbica y, a continuación, los pares de ángulos $(q_1(t),q_2(t))$ que se envían al controlador del robot como referencias articulares.
+
+\subsubsection{Interpolación articular y generación de la trayectoria por giro}
+
+Una vez obtenidos los pares de ángulos deseados $(q_{1,k},q_{2,k})$ mediante la cinemática inversa para cada punto de control $k=0,\dots,N$, la trayectoria que debe seguir el manipulador no se ejecuta saltando directamente entre esos valores, sino recorriendo un camino continuo en el espacio articular. Para ello se interpola linealmente entre cada par consecutivo de configuraciones.
+
+Sea el par de configuraciones
+\[
+(q_{1,k},q_{2,k}) \quad\text{y}\quad (q_{1,k+1},q_{2,k+1}),
+\]
+correspondientes, por ejemplo, a dos puntos consecutivos de la spline cartesiana $(x(t),y(t))$. Se introduce un parámetro de interpolación $s\in[0,1]$ y se definen los ángulos intermedios como
+\begin{align}
+q_1^{(k)}(s) &= (1-s)\,q_{1,k} + s\,q_{1,k+1}, \label{eq:q1_interp_cont}\\
+q_2^{(k)}(s) &= (1-s)\,q_{2,k} + s\,q_{2,k+1}. \label{eq:q2_interp_cont}
+\end{align}
+Para $s=0$ se recupera exactamente la configuración inicial
+\[
+q_1^{(k)}(0)=q_{1,k},\qquad q_2^{(k)}(0)=q_{2,k},
+\]
+y para $s=1$ se obtiene la configuración final
+\[
+q_1^{(k)}(1)=q_{1,k+1},\qquad q_2^{(k)}(1)=q_{2,k+1}.
+\]
+
+En la implementación se utilizan $M$ puntos intermedios entre cada par de configuraciones; esto equivale a muestrear el parámetro
+\[
+s_n = \frac{n}{M-1}, \qquad n = 0,1,\dots,M-1.
+\]
+Sustituyendo $s_n$ en \eqref{eq:q1_interp_cont}–\eqref{eq:q2_interp_cont} se obtiene la versión discreta
+\begin{align}
+q_{1,k}[n] &= q_{1,k} + \frac{n}{M-1}\,\bigl(q_{1,k+1}-q_{1,k}\bigr), \label{eq:q1_interp_disc}\\
+q_{2,k}[n] &= q_{2,k} + \frac{n}{M-1}\,\bigl(q_{2,k+1}-q_{2,k}\bigr). \label{eq:q2_interp_disc}
+\end{align}
+Para $n=0$ se cumple $q_{1,k}[0]=q_{1,k}$ y $q_{2,k}[0]=q_{2,k}$, mientras que para $n=M-1$ se cumple $q_{1,k}[M-1]=q_{1,k+1}$ y $q_{2,k}[M-1]=q_{2,k+1}$. De esta manera, el movimiento entre dos puntos de control se descompone en $M$ pasos angulares pequeños; en el código se toma $M=100$ dado que con estos puntos se permite visualizar una trayectoria más ceñida al trébol.
+
+A partir de estos ángulos interpolados se recuperan las posiciones cartesianas teóricas mediante la cinemática directa del manipulador 2R. Para cada par $(q_{1,k}[n],q_{2,k}[n])$ se calculan las coordenadas del efector respecto a la base como
+\begin{align}
+x_{k}[n] &= L_1 \cos\bigl(q_{1,k}[n]\bigr)
+         + L_2 \cos\bigl(q_{1,k}[n] + q_{2,k}[n]\bigr),\\
+y_{k}[n] &= L_1 \sin\bigl(q_{1,k}[n]\bigr)
+         + L_2 \sin\bigl(q_{1,k}[n] + q_{2,k}[n]\bigr).
+\end{align}
+Repitiendo el procedimiento para todos los segmentos $k=0,\dots,N-1$ se obtiene una secuencia densa de puntos $(x_{k}[n],y_{k}[n])$ que aproxima la trayectoria de referencia generada por la spline cartesiana, pero expresada como resultado de girar realmente las articulaciones.
+
+\paragraph{Implementación en la simulación.}
+En el programa de Python, este proceso se encapsula en la función:
+\begin{verbatim}
+def generar_trayectoria_por_giro_articulaciones(robot,
+                                               q1_inicial, q2_inicial,
+                                               q1_final,   q2_final,
+                                               num_puntos=100):
+    q1_tray = np.linspace(q1_inicial, q1_final, num_puntos)
+    q2_tray = np.linspace(q2_inicial, q2_final, num_puntos)
+
+    x_tray, y_tray = [], []
+    for q1, q2 in zip(q1_tray, q2_tray):
+        x, y = robot.forward_kinematics(q1, q2)
+        x_tray.append(x)
+        y_tray.append(y)
+
+    return np.array(x_tray), np.array(y_tray), q1_tray, q2_tray
+\end{verbatim}
+La instrucción \texttt{np.linspace} implementa numéricamente las ecuaciones de interpolación lineal \eqref{eq:q1_interp_disc}–\eqref{eq:q2_interp_disc}, generando $M=\texttt{num\_puntos}$ valores igualmente espaciados entre cada par de ángulos.  
+La función \texttt{robot.forward\_kinematics} evalúa la cinemática directa para cada par $(q_1,q_2)$ y produce las listas $\{x_{k}[n]\}$ y $\{y_{k}[n]\}$ que se usan para trazar la trayectoria simulada del efector.
+
+\paragraph{Uso para el control de la trayectoria real.}
+En el manipulador físico, la misma secuencia de ángulos $q_1[n],q_2[n]$ que se obtiene por interpolación se utiliza como referencia para los controladores PID que corren en el Arduino.  
+En cada periodo de muestreo el simulador envía al microcontrolador el siguiente par de referencias $(q_1[n],q_2[n])$ (en radianes), mientras que los encoders proporcionan las mediciones cuantizadas de las articulaciones.  
+El controlador compara la referencia con los ángulos medidos y ajusta el PWM de los motores para que el robot recorra, en el espacio articular, exactamente la trayectoria definida por \eqref{eq:q1_interp_disc}–\eqref{eq:q2_interp_disc}.  
+De esta forma, la spline cartesiana define \emph{qué} se quiere dibujar, la cinemática inversa determina \emph{qué ángulos} debe adoptar cada articulación, y la interpolación articular combinada con la cinemática directa especifica \emph{cómo} se mueve el brazo entre cada par de puntos de control.
+
+
+
+
+\subsection{Selección de componentes}
+
+\subsubsection{Actuadores}
+
+En lugar de dimensionar motores a partir de los requerimientos de par calculados, se decidió reutilizar motores disponibles en el laboratorio y ajustar el diseño mecánico en consecuencia.  Los dos actuadores utilizados fueron:
+
+\begin{itemize}
+  \item \textbf{Motor M1 (articulación 1):} un motor DC con reductora de la serie GM9413 de Ametek/Pittman.  El catálogo \textit{Pittman Express} indica que el modelo con reductora \SI{19.7}{\colon\!1} (GM9413‑2) ofrece un par continuo de aproximadamente \SI{45}{\ounce\,inch} (\SI{0.318}{\newton\metre}) y un par de arranque de \SI{109}{\ounce\,inch} (\SI{0.77}{\newton\metre}), con una velocidad sin carga de \SI{142}{\rpm} y una tensión nominal de \SI{12}{\volt}\,[\!\cite{pittman}].  Estas características permiten soportar el par dinámico estimado para el primer eslabón mediante la relación de reducción y el margen de par pico.  El motor integra un encoder incremental óptico de 180 ranuras fabricado con un disco impreso en 3D.
+
+  \item \textbf{Motor M2 (articulación 2):} un micromotor de imán de tierras raras Faulhaber serie 2342L012CR.  De acuerdo con la hoja de datos de Faulhaber, la variante nominal de \SI{12}{\volt} (2342S012CR) proporciona un par nominal de \SI{19.8}{\milli\newton\metre}, una velocidad sin carga de aproximadamente \SI{7530}{\rpm} y un par de estancamiento de \SI{86.1}{\milli\newton\metre}\,[\!\cite{faulhaber}].  Aunque su par es menor que el del motor M1, la segunda articulación experimenta cargas gravitacionales de solo \SI{0.081}{\newton\metre} para las masas consideradas, de modo que el actuador resulta adecuado tras la reducción implementada con engranajes.
+\end{itemize}
+
+La elección se basó principalmente en la disponibilidad: los motores descritos se encontraban en el inventario y contaban con reductora y ejes mecanizados.  Su adopción implicó diseñar los eslabones con masas ligeras (acrílico para el eslabón 1 y aluminio para el eslabón 2, como se explica más adelante) y limitar el rango angular de la articulación 1 a unos \SI{200}{\degree}, evitando así configuraciones con par gravitacional excesivo.
+
+\subsubsection{Sensores}
+
+Para la medición de posición angular se emplearon discos codificadores con \SI{180}{} ranuras acoplados a cada motor y sensores ópticos ranurados OPB800 de la serie W.  Estos sensores disponen de una ranura de \SI{9.5}{\milli\metre} de ancho y permiten elegir diferentes aperturas de emisión y recepción.  El encapsulado W proporciona un cable de \SI{610}{\milli\metre} con cuatro hilos (ánodo, cátodo, colector y emisor) y la carcasa está fabricada con plástico opaco para proteger la fototransistancia de la luz ambiente\,[\!\cite{opb800}].  Las especificaciones máximas del fototransistor incluyen una tensión de colector–emisor de \SI{30}{\volt} y una corriente de colector de \SI{30}{\milli\ampere}\,[\!\cite{opb800}].  Con un disco de \SI{180}{} ranuras, cada transición corresponde a un incremento angular de \SI{2}{\degree}, de modo que la medición de posición se cuantiza en ese paso; el código de control interpola linealmente entre transiciones para mejorar la estimación.
+
+\subsubsection{Electrónica de potencia}
+
+Ambos motores son controlados mediante un puente H doble L298N.  Este dispositivo permite entregar corrientes de hasta \SI{2}{\ampere} por canal y soporta tensiones de motor de \SI{46}{\volt}.  El microcontrolador empleado fue un Arduino Uno, que genera señales PWM de 12 bits mediante un temporizador de 16 bits.  Las salidas PWM se conectan a las entradas de control del L298N y los pines de dirección (IN1, IN2, IN3, IN4) determinan el sentido de giro.  El Arduino lee los encoders a través de los sensores OPB800 en modo \emph{polling} para evitar interrupciones, y ejecuta un controlador PID independiente para cada articulación.
+
+\subsection{Modelo dinámico y estimación de torques}
+
+Para justificar la factibilidad de los motores seleccionados se elaboró un modelo dinámico aproximado del manipulador.  Sea $m_1$ la masa del sistema que conforma el primer eslabón, $m_2$ la masa del segundo eslabón y $m_e$ la masa del efector.  El primer eslabón no es una barra cantiléver en voladizo sino un conjunto de dos viguetas sujetas mediante chumaceras (rodamientos tipo pedestal) en sus extremos, como se muestra en la figura~\ref{fig:soporte}.  Dichos rodamientos sostienen la mayor parte del peso y transmiten el torque del motor a través de un acoplamiento, por lo que la contribución de la gravedad al torque de la articulación 1 es reducida.  Por simplicidad, modelaremos cada eslabón como una barra homogénea de longitud $L_i$ con su centro de masa en la mitad y momento de inercia $I_i = \tfrac{1}{3} m_i L_i^2$ respecto al extremo que se une al motor.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.75\textwidth]{Esquema del mecanismo.png}
+  \caption{Esquema del mecanismo 2R con el sistema de soporte del primer eslabón.  El eslabón 1 se apoya en dos chumaceras a cada lado que soportan el peso del conjunto.  El motor M1 proporciona torque para girar el eje sin cargar con toda la gravedad.  El eslabón 2 está acoplado al motor M2 y puede girar libremente.}
+  \label{fig:soporte}
+\end{figure}
+
+\subsection{Matrices de inercia y fuerzas generalizadas}
+
+El Lagrangiano $\mathcal{L} = T - V$ del manipulador se obtiene sumando la energía cinética traslacional y rotacional de ambos eslabones y restando la energía potencial gravitatoria.  Tras el procedimiento estándar se obtiene la matriz de inercia $M(\boldsymbol{\theta})$ y el vector de fuerzas centrífugas y de Coriolis $C(\boldsymbol{\theta},\dot{\boldsymbol{\theta}})\dot{\boldsymbol{\theta}}$:
+\begin{align}
+M(\boldsymbol{\theta}) &= \begin{bmatrix}
+\alpha + 2 \beta \cos \theta_2 & \delta + \beta \cos \theta_2 \\
+\delta + \beta \cos \theta_2 & \delta
+\end{bmatrix},\\
+C(\boldsymbol{\theta},\dot{\boldsymbol{\theta}})\dot{\boldsymbol{\theta}} &= \begin{bmatrix}
+ -\beta \sin \theta_2\, (2 \dot{\theta}_1 \dot{\theta}_2 + \dot{\theta}_2^2) \\
+ + \beta \sin \theta_2\, \dot{\theta}_1^2
+\end{bmatrix},
+\end{align}
+donde $\alpha = I_1 + I_2 + m_2 L_1^2$, $\beta = m_2 L_1 L_{c2}$, $\delta = I_2$, y $L_{ci}$ denota la distancia del centro de masa del eslabón $i$ al eje de articulación ($L_{c1}=L_1/2$, $L_{c2}=L_2/2$).  El vector de torques debido a la gravedad es
+\begin{equation}
+G(\boldsymbol{\theta}) = \begin{bmatrix}
+(m_1 L_{c1} + m_2 L_1) g \cos \theta_1 + m_2 L_{c2} g \cos (\theta_1 + \theta_2) \\
+m_2 L_{c2} g \cos (\theta_1 + \theta_2)
+\end{bmatrix},
+\end{equation}
+con $g=\SI{9.81}{\metre\per\second\squared}$ la aceleración de 0la gravedad.
+
+\subsection{Estimación numérica de torques}
+
+Asumiendo masas $m_1\approx\SI{0.15}{\kilogram}$ para el conjunto del eslabón 1 y $m_2\approx\SI{0.10}{\kilogram}$ para el eslabón 2, el torque gravitacional puro en una barra en voladizo se obtendría como
+\[ \tau_{1,\text{cant}} = m_1 g \tfrac{L_1}{2} + m_2 g \bigl(L_1 + \tfrac{L_2}{2}\bigr) \approx \SI{0.48}{\newton\metre}. \]
+Sin embargo, en nuestro diseño el peso del eslabón 1 está repartido entre las chumaceras laterales (figura~\ref{fig:soporte}) y el motor solo ejerce torque sobre el eje; por lo tanto el par gravitacional efectivo se reduce a una fracción de este valor.  Si se supone que las chumaceras soportan alrededor del 80 \% del peso, el torque que debe suministrar el motor M1 para compensar la gravedad se aproxima a
+\[ \tau_1^{\text{grav}} \approx 0.2\, \tau_{1,\text{cant}} \approx \SI{0.10}{\newton\metre}. \]
+Para la articulación 2, el par gravitacional permanece
+\[ \tau_2^{\text{grav}} = m_2 g \tfrac{L_2}{2} \approx \SI{0.081}{\newton\metre}, \]
+ya que este eslabón se suspende directamente del eje del motor.  Si se consideran aceleraciones deseadas de \SI{1}{\radian\per\second\squared}, los términos inerciales aportan torques menores a \SI{0.05}{\newton\metre}.  En resumen, los motores deben principalmente vencer la inercia y fricción; las chumaceras alivian la carga gravitatoria.
+
+El motor Pittman con reductora de \SI{19.7}{\colon\!1} entrega un par continuo de \SI{0.318}{\newton\metre} y un par de estancamiento de \SI{0.77}{\newton\metre} [\!\cite{pittman}], por lo que dispone de margen suficiente para soportar el par dinámico de \SI{0.10}{\newton\metre} y proporcionar aceleraciones rápidas sin saturar.  En la articulación 2, el par requerido es inferior a \SI{0.1}{\newton\metre} y el micromotor Faulhaber ofrece hasta \SI{86.1}{\milli\newton\metre} de par de estancamiento [\!\cite{faulhaber}]; con una reducción adicional o una relación de transmisión se puede superar con holgura la demanda.
+
+
+\section{Implementación}
+
+
+\subsection{Adaptación del mecanismo a los motores disponibles}
+
+Desde el inicio del proyecto se decidió trabajar con dos motores de corriente continua que disponíamos: un motor Pittman con reductora de la serie GM9413 para la articulación 1 y un motor Faulhaber 2342L012CR para la articulación 2. En consecuencia, el diseño del manipulador 2R no partió de un dimensionamiento clásico ``par requerido $\rightarrow$ motor'', sino del problema inverso: ajustar la geometría, las masas y el rango de movimiento del mecanismo para que los motores disponibles pudieran cumplir la tarea de dibujo del trébol.
+
+El motor Pittman con caja reductora \SI{19.7}{\colon\!1} presenta, según el catálogo del fabricante, un par continuo del orden de \SI{0.318}{\newton\metre} y un par de arranque cercano a \SI{0.77}{\newton\metre}. Estos valores resultan adecuados para la primera articulación, que soporta el peso principal del eslabón 1 y de la estructura que sostiene al motor 2. Para explotar este margen de par sin llevar al motor a la saturación térmica, se adoptaron tres decisiones de diseño: (i) limitar el rango angular útil de la articulación 1 a aproximadamente \SI{200}{\degree} (de \SI{-90}{\degree} a \SI{110}{\degree}), evitando configuraciones extremas con palanca desfavorable; (ii) utilizar acrílico de \SI{5}{\milli\metre} en el eslabón 1 para reducir la masa; y (iii) apoyar el eslabón en dos pares con chumaceras tipo pedestal de manera que la mayor parte de las cargas radiales se transmitan a los rodamientos y el motor trabaje principalmente aportando par al movimiento.
+
+El motor Faulhaber 2342L012CR utilizado en la articulación 2 es un motorreductor de precisión de 12 V con caja reductora planetaria metálica, según la ficha comercial del motorreductor~[3], la etapa de engranajes con relación aproximada de $1\!:\!64$ entrega un par nominal del orden de \SI{17.54}{kg\cdot cm}, equivalente a unos \SI{1.7}{\newton\metre}, con una velocidad sin carga cercana a \SI{120}{rpm} en el eje de salida. Este nivel de par, incluso considerando pérdidas y márgenes de seguridad, es muy superior al requerido para acelerar y sostener el eslabón 2 (tubo EMT aligerado) y el efector final, por lo que la segunda articulación trabaja lejos de su límite. La reductora planetaria reduce la alta velocidad del micromotor \emph{coreless} y aumenta el par disponible, mientras que el encoder acoplado al eje de salida permite cerrar el lazo de posición. Para integrar el conjunto al manipulador se diseñó un soporte en PETG que fija el cuerpo del motorreductor a la plataforma superior y un acople de aluminio que transmite el par al tubo EMT, manteniendo la alineación del eje y minimizando los momentos flectores sobre los rodamientos del motor.
+
+
+El resultado de estas decisiones es un manipulador en el que la carga gravitacional y los esfuerzos dinámicos se encuentran dentro de la envolvente de operación segura de ambos motores. La estructura se ajusta a los actuadores disponibles en lugar de exigir motores de mayor tamaño, lo que refleja una estrategia de diseño orientada al aprovechamiento de recursos existentes sin sacrificar la funcionalidad del sistema.
+
+\subsection{Diseño mecánico y selección de componentes}
+
+\subsubsection{Materiales y método de elaboración}
+
+El eslabón 1 se construyó a partir de dos placas de acrílico de \SI{5}{\milli\metre} de espesor, cortadas por láser según el contorno definido en CAD. Estas placas forman dos columnas paralelas que funcionan como largueros de una viga tipo ``portal''. Cada columna se apoya en dos chumaceras de pedestal atornilladas a una base de MDF, generando un apoyo doble a cada lado que garantiza la alineación y reparte las cargas entre cuatro rodamientos. Uno de los laterales de acrílico incorpora el acople mecánico al eje del motor Pittman, mientras el opuesto actúa como apoyo libre.
+
+En la parte superior de las columnas se montó una plataforma impresa en 3D en material PETG, diseñada como una viga rígida que une las dos placas acrílicas. Sobre esta plataforma se atornilla el motor Faulhaber (articulación 2) mediante un soporte también impreso en PETG. El eslabón 2 está constituido por un tubo EMT modificado, soldado en los extremos a piezas macizas que facilitan el acople al eje del motor y al soporte de la herramienta. La herramienta de marcado (un marcador tipo plumón) se aloja en un acople específico impreso en PETG de alta densidad, que permite el ajuste del útil y asegura suficiente rigidez durante el trazado.
+
+Todos los componentes impresos (plataformas, soportes de motor y acople de marcador) se fabricaron con un porcentaje de relleno alto para maximizar la resistencia mecánica y minimizar deformaciones elásticas durante el movimiento. La base del manipulador se construyó en MDF, lo que proporciona una superficie plana, fácil de mecanizar y suficientemente rígida para las cargas del experimento. La combinación de corte láser en acrílico, impresión 3D en PETG y elementos comerciales (tubo EMT, chumaceras y tornillería) permitió un proceso de fabricación rápido, repetible y compatible con el equipamiento habitual de un laboratorio académico.
+
+\subsubsection{Selección y adaptación de motores}
+
+Desde el punto de vista mecánico, el motor Pittman se montó con el eje en disposición horizontal, fijado a la base de MDF mediante un soporte impreso en PETG que envuelve el cuerpo del motor y transfiere las fuerzas de reacción a través de tornillos pasantes. El acople entre el eje del motor y la columna de acrílico se realizó mediante un cubo metálico con tornillos prisioneros, de modo que la unión pudiera desmontarse para mantenimiento o reajuste. La geometría del eslabón 1 se definió para que el centro de masa del conjunto (columnas, plataforma y motor 2) permaneciera lo más cerca posible del eje de rotación, reduciendo el par gravitacional máximo que debe suministrar M1.
+
+El motor Faulhaber se fijó a la plataforma superior mediante un soporte también en PETG, que distribuye las cargas en la cara delantera del motor y evita que éste trabaje como elemento estructural. El acople de aluminio prolonga el eje y proporciona una interfaz cilíndrica donde se sujeta el tubo EMT mediante prisioneros. Esto permite reemplazar el tubo por otros de distinta longitud sin modificar el motor. La elección del tubo EMT como eslabón 2 obedece a un compromiso entre peso reducido, facilidad de soldadura y suficiente rigidez a flexión para la escala del manipulador.
+
+\subsubsection{Selección de sensores}
+
+Para la medición de posición angular en ambas articulaciones se emplearon discos ranurados de \SI{180}{} ranuras acoplados directamente a los ejes de los motores y sensores ópticos OPB800 de la serie W. Cada sensor OPB800 integra un diodo emisor infrarrojo y un fototransistor en configuración ranurada; el disco pasa por la ranura interrumpiendo el haz de luz y generando una señal digital adecuada para ser leída por el microcontrolador [opb800]. Con \SI{180}{} ranuras y detección de un flanco por ranura, la resolución resultante es de \SI{2}{\degree} por transición, valor que se utilizó explícitamente en la simulación y en el control.
+
+La elección de este tipo de sensor se justifica por su simplicidad eléctrica (salida de colector abierto), su robustez mecánica y la facilidad de integración con discos fabricados por corte láser o impresión 3D. Aunque la resolución es modesta comparada con la de encoders incrementales industriales, resulta suficiente para demostrar el efecto de la cuantización en el dibujo del trébol y mantener el coste del prototipo bajo. En futuras versiones podría sustituirse por encoders de mayor densidad o por dispositivos absolutos si se requiere mayor precisión.
+
+\subsubsection{Electrónica de control y potencia}
+
+El sistema de control se implementó alrededor de una placa Arduino Uno, que actúa como unidad de procesamiento principal. El Arduino genera las referencias de PWM para los motores, ejecuta los algoritmos de control PID y realiza la lectura de los encoders a través de interrupciones externas. La tensión lógica de \SI{5}{\volt} se obtiene de la propia placa, mientras que la alimentación de potencia se suministra mediante dos fuentes externas: una de \SI{24}{\volt} para el motor Pittman y otra de \SI{12}{\volt} para el motor Faulhaber. Ambas fuentes comparten referencia de tierra con el Arduino para garantizar niveles de señal consistentes.
+
+La etapa de potencia se basa en un puente H doble L298N, que permite controlar independientemente cada motor en velocidad y sentido de giro. El Arduino gobierna los pines de habilitación (ENA y ENB) mediante señales PWM y los pines de dirección (IN1–IN4) mediante salidas digitales, generando así un control por modulación de ancho de pulso con inversión de polaridad. Se añadieron diodos de rueda libre y condensadores de desacoplo según las recomendaciones del fabricante para limitar los transitorios de conmutación.
+
+Los sensores OPB800 se alimentan con \SI{5}{\volt} a través de resistencias limitadoras de corriente para los diodos emisores, dimensionadas para mantener una corriente del orden de unos pocos miliamperios. Las salidas de fototransistor se conectan a las entradas digitales del Arduino con resistencias de \emph{pull-up} internas o externas, obteniendo así señales compatibles con la lógica TTL. El conjunto de fuentes, placa Arduino, módulo L298N y cableado de sensores se montó sobre la misma base de MDF, organizando los conductores de potencia y de señal por separado para reducir interferencias electromagnéticas.
+
+Este conjunto de decisiones en materiales, arquitectura mecánica y electrónica permitió construir un manipulador 2R funcional, capaz de ejecutar la trayectoria tipo trébol con un compromiso razonable entre precisión, complejidad y costo, partiendo de componentes disponibles en el laboratorio.
+
+
+
+
+\subsection{Sistema de control}
+
+El control se implementó en un Arduino Uno.  El código utiliza interrupciones para contar las ranuras de los encoders con antirrebote por software y ejecuta el control en un lazo de \SI{50}{\milli\second} de periodo.  En cada ciclo se calcula el ángulo de cada articulación a partir del número acumulado de ranuras (\SI{2}{\degree} por ranura) y se compara con una referencia interna que avanza suavemente hacia la referencia comandada mediante rampas de velocidad.  Esta interpolación evita saltos bruscos cuando se cambian las metas por comunicación serie.
+
+La arquitectura de control es distinta para cada articulación:
+\begin{itemize}
+  \item Para el motor 1 se implementó un regulador \textbf{PID} con limitación direccional.  Se calcula la parte proporcional y derivativa sobre el error de posición (en grados), mientras que el integrador acumula el error con saturación para evitar que el control crezca indefinidamente.  Se limita el esfuerzo negativo (hacia abajo) a un valor inferior al esfuerzo positivo para proteger la reductora.  La salida del control se convierte a un ciclo de trabajo PWM de 8 bits (0–255) y se aplica al puente H L298N.
+  \item Para el motor 2 se utiliza un regulador \textbf{PD} con banda muerta.  Si el error de posición es menor que \SI{2}{\degree}, la salida se anula para evitar oscilaciones.  Este controlador carece de término integral porque la holgura y la gravedad son pequeñas en la articulación 2.  También se saturan los valores máximos de PWM para respetar la capacidad del micromotor.
+\end{itemize}
+
+El código asigna los sensores a los pines digitales 2 y 3, y los canales de PWM a los pines 5 y 10 del Arduino.  Se incluyen comandos por puerto serie para recalibrar el cero de los encoders, modificar las ganancias PID en caliente y detener los motores.  La referencia de trayectoria se envía desde un simulador mediante comandos de la forma \texttt{R,th1,th2}, donde \texttt{th1} y \texttt{th2} están en radianes.
+
+Antes de iniciar el dibujo del trébol se ejecuta una fase de giro de \SI{90}{\degree} que mueve el efector desde la postura vertical hacia el punto de inicio de la figura. Para analizar el efecto de la resolución del sensor se comparó la respuesta del mismo algoritmo de seguimiento usando, por un lado, un encoder de alta resolución y, por otro, la cuantización real impuesta por el disco ranurado de \SI{180}{} ranuras y el sensor OPB800. La figura~\ref{fig:simulation} resume esta comparación a través de la simulación en Python.
+
+\section{Funcionamiento}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{2.jpeg}
+  \caption{Comparación de la trayectoria del efector final. Izquierda: simulación con encoder ideal de alta resolución, donde la trayectoria seguida en rojo prácticamente coincide con el trébol de referencia. Derecha: simulación con cuantización de \SI{2}{\degree} propia del encoder óptico OPB800 con disco de \SI{180}{} ranuras; la trayectoria aparece “dienteada” alrededor del trébol ideal debido a los saltos angulares discretos.}
+  \label{fig:simulation}
+\end{figure}
+
+\newpage
+
+\part{Proceso}
+\label{sec:proceso}
+
+En esta sección se documentan las reflexiones sobre la gestión del proyecto,
+el trabajo colaborativo, el proceso de aprendizaje individual y las
+recomendaciones para futuros trabajos de Aprendizaje Basado en Problemas
+orientado a proyecto (ABP-P).
+
+%------------------------------------------------------------
+\section{Gestión del Proyecto}
+\label{subsec:gestion_proyecto}
+  
+\subsubsection*{Dinámica de las reuniones}
+% Ejemplos: frecuencia, duración, modalidad (presencial/virtual), herramientas usadas, etc.
+Completar con la descripción de cómo se organizaron las reuniones del grupo,
+qué tan efectivas fueron y qué dificultades se presentaron.
+
+\subsubsection*{Manejo de tiempos y recursos}
+% Ejemplos: cronograma, cumplimiento de plazos, organización de tareas, uso de recursos del curso, etc.
+Completar con la reflexión sobre el cumplimiento de fechas, distribución de
+tareas, ajustes al cronograma y uso de recursos disponibles.
+
+\subsubsection*{Discusión y verificación del avance}
+% Ejemplos: hitos, revisiones internas, evidencias de avance, etc.
+Completar explicando cómo se monitoreó el avance del proyecto, cómo se tomaron
+decisiones y cómo se revisaron los resultados parciales.
+
+\subsubsection*{Interacción con el docente facilitador}
+% Ejemplos: espacios de retroalimentación, uso de las tutorías, claridad de las orientaciones, etc.
+Completar describiendo cómo fue la comunicación con el docente, qué tan útil
+resultó la retroalimentación y cómo influyó en el proyecto.
+
+%------------------------------------------------------------
+\subsection{Trabajo colaborativo }
+\label{subsec:trabajo_colaborativo}
+
+\subsubsection*{Roles de los participantes}
+
+Se identificaron las características y habilidades de cada uno de los integrantes del grupo para delegar
+tareas específicas donde cada uno se sintiera cómodo y a gusto realizando el trabajo correspondiente.
+El trabajo se dividió en dos grandes frentes: el ensamble del dispositivo mecánico y la sección de
+electrónica–control.
+
+La parte mecánica estuvo a cargo de Nicolás Garzón y Jonatan Valero, mientras que la sección de
+electrónica y control fue conformada por Juan Beltrán, Sergio Bolaños, David Pirateque y Óscar Siabato.
+Estos roles se mantuvieron la mayor parte del desarrollo del proyecto; sin embargo, en algunas
+situaciones fue necesaria la intervención de integrantes en un rol que originalmente no les correspondía,
+con el fin de sobreponerse a obstáculos específicos y asegurar el avance global del proyecto.
+
+\subsubsection*{Colaboración dentro del grupo}
+
+Cada avance de los integrantes se socializó de forma periódica para que todos estuvieran al tanto del
+desarrollo del proyecto. Esto permitió que todos conocieran y se apropiaran del proceso seguido en cada
+parte del sistema.
+
+Para la solución de problemas, principalmente en términos académicos, se generaron discusiones entre
+todos los integrantes del equipo con el objetivo de concretar una idea o enfoque en el que todos
+estuviéramos de acuerdo. En estas discusiones todos tenían la palabra para opinar o aportar, lo que
+facilitó llegar a soluciones consensuadas.
+
+Consideramos que delegar las tareas según las habilidades y el ánimo frente al proceso que se estaba
+desarrollando permitió que cada integrante pudiera trabajar con el máximo esfuerzo. Asimismo, fueron muy
+enriquecedoras las retroalimentaciones dadas en la presentación de avances, y las discusiones frente a
+cualquier duda favorecieron el trabajo colaborativo y un aprendizaje colectivo mientras se apropiaban los
+conceptos desarrollados en el proyecto.
+
+\subsubsection*{Colaboración con el docente facilitador}
+
+La colaboración con el docente facilitador fue especialmente relevante en la sección de
+electrónica–control. Sus aportes se reflejaron en la orientación para la selección del microcontrolador,
+en la identificación adecuada de la planta y en la elección del tipo de control más conveniente para el
+mecanismo. Las sugerencias del docente llevaron a ajustar decisiones de diseño y a refinar la estrategia
+de control, lo que se tradujo en un mejor desempeño del sistema y en una comprensión más profunda de los
+fundamentos teóricos asociados.
+
+\subsubsection*{Evaluación global del trabajo en equipo}
+
+En síntesis, el trabajo en equipo se caracterizó por una distribución clara de roles, una comunicación
+constante y espacios de discusión abiertos y respetuosos. La combinación de trabajo especializado
+(mecánica y electrónica–control) con momentos de integración colectiva del conocimiento permitió avanzar
+de manera sólida en el proyecto y favoreció el aprendizaje conjunto.
+
+Como aspectos por mejorar, reconocemos la importancia de planificar con mayor anticipación algunos
+entregables y de documentar de forma más sistemática ciertas decisiones técnicas. No obstante, valoramos
+positivamente la forma en que el grupo logró coordinarse, resolver conflictos y apoyarse mutuamente para
+alcanzar los objetivos planteados.
+
+
+%------------------------------------------------------------
+\subsection{Proceso de aprendizaje (Redacción individual)}
+\label{subsec:proceso_aprendizaje}
+
+En esta subsección \textbf{cada integrante} del equipo presenta su reflexión
+personal sobre su proceso de aprendizaje durante el proyecto.
+
+% === Copiar el bloque siguiente para cada integrante ===
+\subsubsection*{Nombre del integrante 1}
+
+
+\paragraph{Correspondencia con las actividades del curso}
+
+Completar con la reflexión sobre cómo el proyecto se articuló con las demás
+actividades del curso.
+
+\paragraph{Conocimientos adquiridos}
+
+Completar mencionando los conceptos, herramientas y métodos nuevos que
+aprendió o reforzó durante el proyecto.
+
+\paragraph{Competencias y habilidades desarrolladas}
+
+Completar describiendo qué habilidades se fortalecieron (técnicas y blandas)
+y en qué situaciones del proyecto se evidenciaron.
+
+\paragraph{Efectividad del proceso de aprendizaje}
+
+Completar evaluando qué aspectos del curso y del proyecto facilitaron el
+aprendizaje, y qué se podría mejorar en futuras ediciones.
+
+\subsubsection*{Nombre del integrante 2}
+
+
+\paragraph{Correspondencia con las actividades del curso}
+
+Completar con la reflexión sobre cómo el proyecto se articuló con las demás
+actividades del curso.
+
+\paragraph{Conocimientos adquiridos}
+
+Completar mencionando los conceptos, herramientas y métodos nuevos que
+aprendió o reforzó durante el proyecto.
+
+\paragraph{Competencias y habilidades desarrolladas}
+
+Completar describiendo qué habilidades se fortalecieron (técnicas y blandas)
+y en qué situaciones del proyecto se evidenciaron.
+
+\paragraph{Efectividad del proceso de aprendizaje}
+
+Completar evaluando qué aspectos del curso y del proyecto facilitaron el
+aprendizaje, y qué se podría mejorar en futuras ediciones.
+
+\subsubsection*{Nombre del integrante 3}
+
+
+\paragraph{Correspondencia con las actividades del curso}
+
+Completar con la reflexión sobre cómo el proyecto se articuló con las demás
+actividades del curso.
+
+\paragraph{Conocimientos adquiridos}
+
+Completar mencionando los conceptos, herramientas y métodos nuevos que
+aprendió o reforzó durante el proyecto.
+
+\paragraph{Competencias y habilidades desarrolladas}
+
+Completar describiendo qué habilidades se fortalecieron (técnicas y blandas)
+y en qué situaciones del proyecto se evidenciaron.
+
+\paragraph{Efectividad del proceso de aprendizaje}
+
+Completar evaluando qué aspectos del curso y del proyecto facilitaron el
+aprendizaje, y qué se podría mejorar en futuras ediciones.
+
+\subsubsection*{Nombre del integrante 4}
+
+
+\paragraph{Correspondencia con las actividades del curso}
+
+Completar con la reflexión sobre cómo el proyecto se articuló con las demás
+actividades del curso.
+
+\paragraph{Conocimientos adquiridos}
+
+Completar mencionando los conceptos, herramientas y métodos nuevos que
+aprendió o reforzó durante el proyecto.
+
+\paragraph{Competencias y habilidades desarrolladas}
+
+Completar describiendo qué habilidades se fortalecieron (técnicas y blandas)
+y en qué situaciones del proyecto se evidenciaron.
+
+\paragraph{Efectividad del proceso de aprendizaje}
+
+Completar evaluando qué aspectos del curso y del proyecto facilitaron el
+aprendizaje, y qué se podría mejorar en futuras ediciones.
+
+\subsubsection*{Nombre del integrante 5}
+
+
+\paragraph{Correspondencia con las actividades del curso}
+
+Completar con la reflexión sobre cómo el proyecto se articuló con las demás
+actividades del curso.
+
+\paragraph{Conocimientos adquiridos}
+
+Completar mencionando los conceptos, herramientas y métodos nuevos que
+aprendió o reforzó durante el proyecto.
+
+\paragraph{Competencias y habilidades desarrolladas}
+
+Completar describiendo qué habilidades se fortalecieron (técnicas y blandas)
+y en qué situaciones del proyecto se evidenciaron.
+
+\paragraph{Efectividad del proceso de aprendizaje}
+
+Completar evaluando qué aspectos del curso y del proyecto facilitaron el
+aprendizaje, y qué se podría mejorar en futuras ediciones.
+
+\subsubsection*{Nombre del integrante 6}
+
+
+\paragraph{Correspondencia con las actividades del curso}
+
+Completar con la reflexión sobre cómo el proyecto se articuló con las demás
+actividades del curso.
+
+\paragraph{Conocimientos adquiridos}
+
+Completar mencionando los conceptos, herramientas y métodos nuevos que
+aprendió o reforzó durante el proyecto.
+
+\paragraph{Competencias y habilidades desarrolladas}
+
+Completar describiendo qué habilidades se fortalecieron (técnicas y blandas)
+y en qué situaciones del proyecto se evidenciaron.
+
+\paragraph{Efectividad del proceso de aprendizaje}
+
+Completar evaluando qué aspectos del curso y del proyecto facilitaron el
+aprendizaje, y qué se podría mejorar en futuras ediciones.
+
+%------------------------------------------------------------
+\subsection{Recomendaciones para futuros trabajos ABP orientados a proyecto (Redacción individual)}
+\label{subsec:recomendaciones_abp}
+
+En esta subsección \textbf{cada integrante} formula recomendaciones personales
+para mejorar futuros proyectos de ABP.
+
+% === Copiar el bloque siguiente para cada integrante ===
+\subsubsection*{Nombre del integrante 1}
+% Reemplazar por el nombre real del estudiante
+
+\paragraph{Recomendaciones sobre la estructura del curso}
+Completar con sugerencias sobre carga de trabajo, secuencia de actividades,
+momentos de retroalimentación, etc.
+
+\paragraph{Recomendaciones sobre el trabajo en equipo}
+Completar con ideas para mejorar la conformación de grupos, la distribución
+de tareas, la comunicación y la evaluación del trabajo colaborativo.
+
+\paragraph{Recomendaciones sobre el proyecto y la metodología ABP}
+Completar con comentarios sobre la claridad del problema, recursos
+disponibles, tiempos asignados y uso de la metodología ABP.
+
+% (Copiar y pegar este bloque para los demás integrantes)
+% === Copiar el bloque siguiente para cada integrante ===
+\subsubsection*{Nombre del integrante 2}
+% Reemplazar por el nombre real del estudiante
+
+\paragraph{Recomendaciones sobre la estructura del curso}
+Completar con sugerencias sobre carga de trabajo, secuencia de actividades,
+momentos de retroalimentación, etc.
+
+\paragraph{Recomendaciones sobre el trabajo en equipo}
+Completar con ideas para mejorar la conformación de grupos, la distribución
+de tareas, la comunicación y la evaluación del trabajo colaborativo.
+
+\paragraph{Recomendaciones sobre el proyecto y la metodología ABP}
+Completar con comentarios sobre la claridad del problema, recursos
+disponibles, tiempos asignados y uso de la metodología ABP.
+
+% === Copiar el bloque siguiente para cada integrante ===
+\subsubsection*{Nombre del integrante 3}
+% Reemplazar por el nombre real del estudiante
+
+\paragraph{Recomendaciones sobre la estructura del curso}
+Completar con sugerencias sobre carga de trabajo, secuencia de actividades,
+momentos de retroalimentación, etc.
+
+\paragraph{Recomendaciones sobre el trabajo en equipo}
+Completar con ideas para mejorar la conformación de grupos, la distribución
+de tareas, la comunicación y la evaluación del trabajo colaborativo.
+
+\paragraph{Recomendaciones sobre el proyecto y la metodología ABP}
+Completar con comentarios sobre la claridad del problema, recursos
+disponibles, tiempos asignados y uso de la metodología ABP.
+
+% === Copiar el bloque siguiente para cada integrante ===
+\subsubsection*{Nombre del integrante 4}
+% Reemplazar por el nombre real del estudiante
+
+\paragraph{Recomendaciones sobre la estructura del curso}
+Completar con sugerencias sobre carga de trabajo, secuencia de actividades,
+momentos de retroalimentación, etc.
+
+\paragraph{Recomendaciones sobre el trabajo en equipo}
+Completar con ideas para mejorar la conformación de grupos, la distribución
+de tareas, la comunicación y la evaluación del trabajo colaborativo.
+
+\paragraph{Recomendaciones sobre el proyecto y la metodología ABP}
+Completar con comentarios sobre la claridad del problema, recursos
+disponibles, tiempos asignados y uso de la metodología ABP.
+
+% === Copiar el bloque siguiente para cada integrante ===
+\subsubsection*{Nombre del integrante 5}
+% Reemplazar por el nombre real del estudiante
+
+\paragraph{Recomendaciones sobre la estructura del curso}
+Completar con sugerencias sobre carga de trabajo, secuencia de actividades,
+momentos de retroalimentación, etc.
+
+\paragraph{Recomendaciones sobre el trabajo en equipo}
+Completar con ideas para mejorar la conformación de grupos, la distribución
+de tareas, la comunicación y la evaluación del trabajo colaborativo.
+
+\paragraph{Recomendaciones sobre el proyecto y la metodología ABP}
+Completar con comentarios sobre la claridad del problema, recursos
+disponibles, tiempos asignados y uso de la metodología ABP.
+
+% === Copiar el bloque siguiente para cada integrante ===
+\subsubsection*{Nombre del integrante 6}
+% Reemplazar por el nombre real del estudiante
+
+\paragraph{Recomendaciones sobre la estructura del curso}
+Completar con sugerencias sobre carga de trabajo, secuencia de actividades,
+momentos de retroalimentación, etc.
+
+\paragraph{Recomendaciones sobre el trabajo en equipo}
+Completar con ideas para mejorar la conformación de grupos, la distribución
+de tareas, la comunicación y la evaluación del trabajo colaborativo.
+
+\paragraph{Recomendaciones sobre el proyecto y la metodología ABP}
+Completar con comentarios sobre la claridad del problema, recursos
+disponibles, tiempos asignados y uso de la metodología ABP.
+
+\section*{Bibliografía}
+\begin{thebibliography}{9}
+
+\bibitem{proyecto} 
+Departamento de Ingeniería Mecánica, \emph{Proyecto Académico de Servomecanismos 2025‑2S}.  Documento PDF que especifica los requerimientos del manipulador 2R (dimensiones del área de trabajo, rangos de velocidad y escala de la trayectoria).
+
+\bibitem{pittman}
+Pittman Motors, \emph{Pittman Express}.  Hoja de datos del motor con reductora GM9413‑2.  Presenta los pares continuo y de estancamiento y las velocidades sin carga para el motor de \SI{12}{\volt}.
+
+\bibitem{faulhaber}
+Dr.~Fritz Faulhaber GmbH, \emph{Series 2342 CR Motor Data}.  Hoja de características del micromotor de la serie 2342L012CR con datos de tensión nominal, velocidad sin carga y par de estancamiento.
+
+\bibitem{opb800}
+Optek Technology, \emph{OPB800, OPB808, OPB818, OPB848 Slotted Optical Switch}.  Hoja de datos del sensor óptico ranurado empleado para leer los discos codificadores.
+
+\end{thebibliography}
+
+\end{document}

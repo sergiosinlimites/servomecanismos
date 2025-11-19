@@ -46,7 +46,6 @@ const dom = {
   chkSerial: document.getElementById('chk_serial'),
   btnConnect: document.getElementById('btnConnect'),
   btnDisconnect: document.getElementById('btnDisconnect'),
-  btnZero: document.getElementById('btnZero'),
   btnStopS: document.getElementById('btnStop'),
   // PID inputs/buttons
   kp1: document.getElementById('inp_kp1'),
@@ -368,10 +367,6 @@ function start() {
   state.frameIndex = 0;
   state.lastTxTime = 0;
   state.telemetry = [];
-  // Enviar Z
-  if (state.serialEnabled && state.connected) {
-    state.serial.sendZ().catch(() => {});
-  }
   setStatus('Reproduciendo…');
   loop();
 }
@@ -400,7 +395,9 @@ function loop() {
     if ((tNow - state.lastTxTime) >= (state.txPeriodMs / 1000.0)) {
       const th1 = planned.thetas[iTarget * 2];
       const th2 = planned.thetas[iTarget * 2 + 1];
-      state.serial.sendR(th1, th2, (tNow - state.startTimePerf)).catch(() => {});
+      // Enviar referencias en GRADOS al Arduino
+      const d = 180 / Math.PI;
+      state.serial.sendR(th1 * d, th2 * d, (tNow - state.startTimePerf)).catch(() => {});
       state.lastTxTime = tNow;
     }
   }
@@ -767,10 +764,6 @@ dom.btnDisconnect.addEventListener('click', async () => {
   await state.serial.disconnect().catch(() => {});
   state.connected = false;
   setStatus('Serial desconectado.');
-});
-dom.btnZero.addEventListener('click', async () => {
-  if (!state.connected) return;
-  await state.serial.sendZ().catch(() => {});
 });
 dom.btnStopS.addEventListener('click', async () => {
   // Primero detén la simulación (para que no siga enviando R),
